@@ -1,0 +1,32 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: healthmonitor
+          POSTGRES_PASSWORD: healthmonitor
+          POSTGRES_DB: healthmonitor_test
+        ports:
+          - 5433:5432
+        options: >-
+          --health-cmd "pg_isready -U healthmonitor"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - run: uv sync
+        working-directory: backend
+      - run: uv run ruff check .
+        working-directory: backend
+      - run: uv run pytest -v
+        working-directory: backend
