@@ -128,6 +128,18 @@ def accept_invite(
     return _to_household_out(db, db.get(Household, membership.household_id))
 
 
+@router.post("/leave", status_code=status.HTTP_204_NO_CONTENT)
+def leave_household(
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> None:
+    try:
+        service.leave_household(db, user)
+    except service.NotInHousehold as exc:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, str(exc)) from exc
+    db.commit()
+
+
 @router.patch("/visibility", response_model=MembershipOut)
 def update_visibility(
     payload: VisibilityRequest,

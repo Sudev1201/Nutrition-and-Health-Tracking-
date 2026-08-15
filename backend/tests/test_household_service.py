@@ -11,9 +11,11 @@ from app.households.service import (
     create_household,
     get_household_for_user,
     invite_member,
+    leave_household,
     list_members,
     update_visibility,
 )
+from app.models.household import Household
 from app.models.user import User
 
 
@@ -100,3 +102,48 @@ def test_visibility_requires_a_household(db):
 
     with pytest.raises(NotInHousehold):
         update_visibility(db, loner, share_progress=False)
+
+
+def test_leaving_returns_a_member_to_solo(db):
+    owner = _user(db, "stays@example.com")
+    guest = _user(db, "goes@example.com")
+    household = create_household(db, owner, "Home")
+    accept_invite(db, guest, invite_member(db, household, "goes@example.com").token)
+
+    leave_household(db, guest)
+
+    assert get_household_for_user(db, guest) is None
+    # The one who stayed is unaffected.
+    assert get_household_for_user(db, owner).id == household.id
+    assert [m.user_id for m in list_members(db, household.id)] == [owner.id]
+
+
+def test_the_last_member_leaving_removes_the_household(db):
+    owner = _user(db, "last@example.com")
+    household = create_household(db, owner, "Home")
+    household_id = household.id
+
+    leave_household(db, owner)
+
+    assert get_household_for_user(db, owner) is None
+    assert db.get(Household, household_id) is None
+
+
+def test_a_solo_user_cannot_leave(db):
+    loner = _user(db, "nothing-to-leave@example.com")
+
+    with pytest.raises(NotInHousehold):
+        leave_household(db, loner)
+
+
+def test_someone_can_rejoin_after_leaving(db):
+    owner = _user(db, "owner-rejoin@example.com")
+    guest = _user(db, "rejoiner@example.com")
+    household = create_household(db, owner, "Home")
+    accept_invite(db, guest, invite_member(db, household, "rejoiner@example.com").token)
+    leave_household(db, guest)
+
+    second_invite = invite_member(db, household, "rejoiner@example.com")
+    accept_invite(db, guest, second_invite.token)
+
+    assert get_household_for_user(db, guest).id == household.id

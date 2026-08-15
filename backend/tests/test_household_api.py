@@ -82,6 +82,20 @@ def test_an_unknown_invite_token_is_rejected(api, monkeypatch):
     assert response.status_code == 404
 
 
+def test_leaving_returns_you_to_solo(api, monkeypatch):
+    sign_in(api, monkeypatch, "sub-g", "g@example.com")
+    api.post("/households", json={"name": "Home"})
+
+    assert api.post("/households/leave").status_code == 204
+    assert api.get("/households/me").status_code == 404
+
+
+def test_leaving_without_a_household_is_a_404(api, monkeypatch):
+    sign_in(api, monkeypatch, "sub-h", "h@example.com")
+
+    assert api.post("/households/leave").status_code == 404
+
+
 def test_visibility_can_be_updated(api, monkeypatch):
     sign_in(api, monkeypatch, "sub-f", "f@example.com")
     api.post("/households", json={"name": "Home"})

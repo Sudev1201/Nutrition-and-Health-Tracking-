@@ -35,7 +35,7 @@ This app:
 | Health scope | Type 2 diabetes/prediabetes, high cholesterol, high & low BP, thyroid — with lab values, and **medications captured for every condition** |
 | Meal slots | 5 per day: breakfast, snack 1 (mid-morning, optional), lunch, snack 2 (evening), dinner |
 | Language | English only for dish and ingredient names |
-| Sharing | Households: shared custom dishes, members can see each other's progress |
+| Sharing | Solo by default; a household is optional and can be created, joined, or left at any time |
 | Observance | Per-weekday and seasonal vegetarian days are a first-class constraint |
 | Cycle | Women's profiles can track the menstrual cycle and adapt the plan |
 | Eating out | Restaurant and western food logged through the same diary, marked as estimated |
@@ -226,7 +226,7 @@ over plain data structures — no database, no HTTP — which is what makes the 
 | Module | Responsibility |
 |---|---|
 | `auth/` | Google ID token verification, session cookie, user record |
-| `households/` | Household creation, invites, membership, per-user visibility settings |
+| `households/` | Optional households: create, invite, join, leave, per-member visibility |
 | `profiles/` | Onboarding questionnaire, anthropometrics, conditions, thyroid labs/meds, favorites, allergies |
 | `nutrition_core/energy.py` | BMR → TDEE from ICMR-NIN methodology; goal-based calorie adjustment |
 | `nutrition_core/targets.py` | ICMR-NIN reference tables → personalized per-nutrient daily targets |
@@ -484,21 +484,36 @@ adding WhatsApp later is a new adapter rather than a rework.
 
 ---
 
-## Households & Privacy
+## Solo Use & Households
 
-A user can create a household and invite others by email link; each person still signs in with
-their own Google account and keeps their own profile, targets, and plan.
+**Tracking alone is the default and the complete experience.** Signing in gives you a profile,
+targets, a diary, a plan and reports — a household is never required, and someone who only
+tracks for themselves can ignore the concept entirely. Everything the app computes is per-user
+already: targets come from your body and conditions, the compensation ledger is yours, the plan
+is yours.
 
-- **Shared automatically**: custom dishes. A recipe one person enters is available to everyone
-  in the household, so home recipes are entered once.
+A **household** is an optional layer for families who cook together. You can create one, join
+one by invitation, or leave one at any time; leaving returns you to solo tracking with your
+logs, targets and plans untouched, because they were never household-owned in the first place.
+
+When you are in a household:
+
+- **Shared automatically**: custom dishes. A recipe one person enters is available to everyone,
+  so home recipes are typed once.
 - **Shared by default, toggleable off**: daily and weekly nutrition progress — whether each
-  member hit their targets. This is what makes the household view useful to whoever cooks.
-- **Private by default, opt-in to share**: health conditions, thyroid labs, medications, and
-  weight. These are sensitive and never exposed without the member explicitly enabling it.
+  member hit their targets. This is what makes the household useful to whoever cooks.
+- **Private by default, opt-in to share**: health conditions, thyroid labs, medications, weight
+  and cycle data. These are sensitive and never exposed unless the member explicitly enables it.
 
-Because the household usually eats the same food, the planner offers a **cooking view**: for a
+**Dishes are owned by the person who created them, not by the household.** Household members
+can see each other's dishes, which means one rule covers every case: dishes you write while
+solo become visible to the household the moment you join, and they leave with you if you go
+back to solo. Nobody has to re-enter recipes because their living situation changed.
+
+Because a household usually eats the same food, the planner offers a **cooking view**: for a
 given meal slot it shows where members' planned dishes coincide, so one dish can be cooked once
-and portioned differently per person rather than cooking separate meals.
+and portioned differently per person rather than cooking separate meals. Solo users never see
+it, since there is nothing to reconcile.
 
 ## Data Model
 
@@ -517,8 +532,10 @@ Household tables: `households`, `household_members`, `household_invites`.
 Notes:
 - Nutrients stored **long-format** (`ingredient_nutrients` rows), not 150 columns.
 - `ingredients.source` tags IFCT / USDA / INDB so conventions can be normalized.
-- `dishes` carries a nullable `household_id` — null means a curated seed dish, set means a
-  dish someone in that household created, shared with all its members.
+- `dishes` carries a nullable `created_by_user_id` — null means a curated seed dish, set means
+  a user-created one. Visibility is "mine, plus dishes created by anyone currently in my
+  household", which works unchanged whether or not the user has a household. Do **not** key
+  dishes to a household id: that would strand a solo user's recipes and lose them on leaving.
 - `compensation_ledger` rows record `source_date`, `applies_to_date`, `amount`, `capped`,
   `expired` — so the weekly report can honestly show what could not be made up.
 - `observance_rules` covers all three shapes with one table: a recurring weekday, a date range,
@@ -530,6 +547,71 @@ Notes:
 - `meal_slot_times` holds a time and a reminder-on flag per slot, with an optional weekend
   variant — this is what both the reminder scheduler and the medication-window checks read.
 - LLM API keys in `user_settings` stored encrypted at rest.
+
+---
+
+## Pending correction: make households optional
+
+**Context.** Plan 1 shipped households as if they were mandatory. The backend was actually fine
+— no membership simply means `/households/me` returns 404 — but the frontend routes every path
+to `/household`, so the first thing a new user sees is "Create your household" with no way past
+it. A user who only wants to track their own diet is stuck inventing a household of one. Two
+related gaps surfaced while planning this: there is **no way to accept an invite in the UI**
+(the API exists, the mutation and screen do not), and there is **no way to leave a household**
+at all. This correction lands before plan 2.
+
+### Backend
+
+`backend/app/households/service.py` — add `leave_household(db, user) -> None`, raising the
+existing `NotInHousehold` when there is no membership. If the departing member is the last one,
+delete the household too; its unaccepted invites disappear with it via the existing
+`ondelete="CASCADE"`. `households.created_by_user_id` stays pointing at the original creator
+even after they leave — it is a historical record, not an ownership claim, and there is no
+admin role to reassign.
+
+`backend/app/households/router.py` — add `POST /households/leave` returning 204, mapping
+`NotInHousehold` to 404.
+
+New tests in `backend/tests/test_household_service.py` and `test_household_api.py`: leaving
+returns you to solo; the last member leaving removes the household row; a solo user leaving
+gets an error; a remaining member still sees the household after someone else leaves.
+
+### Frontend
+
+`frontend/src/App.tsx` — stop redirecting everything to `/household`. Route `/` to a new
+`HomeScreen` and keep `/household` as an ordinary destination.
+
+`frontend/src/HomeScreen.tsx` (new) — the placeholder that becomes the daily dashboard in plan
+5. For now it states what the app will do and links to household setup, so a solo user has a
+sensible landing page instead of a form demanding a household name.
+
+`frontend/src/AppShell.tsx` — add navigation between Home and Household, so the household screen
+is reachable without being compulsory.
+
+`frontend/src/households/useHousehold.ts` — add the two missing mutations: `useAcceptInvite`
+(posting to the existing `/households/invites/accept`) and `useLeaveHousehold`.
+
+`frontend/src/households/HouseholdScreen.tsx` — rewrite the no-household state. Instead of a
+bare "Create your household" form it should say plainly that tracking alone is fine, and offer
+two clearly optional actions: create a household, or paste an invite token to join one. When
+the user *is* in a household, add a "Leave household" action alongside the member list.
+
+New tests in `frontend/src/households/HouseholdScreen.test.tsx`: the solo state shows both the
+create and join affordances and does not present itself as a required step; the joined state
+offers leaving.
+
+### Verification
+
+1. `cd backend && uv run pytest -v` and `uv run ruff check .` — all green, including the new
+   leave tests.
+2. `cd frontend && npx vitest run && npx tsc --noEmit && npm run build`.
+3. Manually: sign in as a fresh Google account and confirm you land on Home, can use the app,
+   and are never forced to create a household.
+4. Create a household, invite the second account, sign in as it, paste the token, confirm it
+   joins and both members are listed.
+5. Leave from the second account and confirm it returns to solo while the first still sees the
+   household. Then leave from the first and confirm the household row is gone
+   (`docker compose exec -T db psql -U healthmonitor -d healthmonitor -c "select count(*) from households;"`).
 
 ---
 
@@ -595,7 +677,8 @@ Built as one project; this is the order that keeps the app runnable at every ste
 1. **Foundation** — repo scaffold (backend + frontend + docker-compose Postgres), Alembic
    setup, CI running tests.
 2. **Auth & households** — Google sign-in end to end, session handling, protected routes,
-   household creation/invites and visibility settings.
+   optional household creation/join/leave and visibility settings. *(Built; the optional-household
+   correction above is outstanding.)*
 3. **Food & reference data ETL** — ingest INDB recipes + IFCT ingredients + USDA gap-fillers
    into seed tables; normalize units and conventions; verify a sample of dishes by hand against
    the published tables. Also seed `rda_reference` (EAR, RDA/AI, activity-indexed for the four
@@ -674,9 +757,11 @@ Built as one project; this is the order that keeps the app runnable at every ste
 8. Enter two weigh-ins showing drift from goal; confirm the calorie target moves by a bounded step.
 9. Open the weekly report; confirm it shows hits, misses, uncompensated gaps, and next-week
    food suggestions.
-10. Invite a second Google account to the household; confirm a custom dish created by one
-    member appears for the other, that progress is visible, and that health conditions and
-    weight stay hidden until explicitly shared.
+10. Use the app end to end without ever creating a household, confirming solo is a complete
+    experience. Then invite a second Google account; confirm a custom dish created by one
+    member appears for the other, that progress is visible, that health conditions and weight
+    stay hidden until explicitly shared, and that leaving returns a member to solo with their
+    own dishes and logs intact.
 11. Set a "vegetarian on Tuesdays and Fridays" rule and a Purattasi date range; regenerate the
     week and confirm no non-veg appears on those days, and that the following days compensate
     any B12 or iron shortfall the restriction caused.

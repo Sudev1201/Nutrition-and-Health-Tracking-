@@ -99,6 +99,26 @@ def accept_invite(
     return membership
 
 
+def leave_household(db: Session, user: User) -> None:
+    """Return a member to solo tracking.
+
+    Nothing of theirs moves: profile, targets, diary and plans were always
+    per-user. When the last member leaves, the household row goes too —
+    its unaccepted invites cascade away with it.
+    """
+    membership = get_membership(db, user)
+    if membership is None:
+        raise NotInHousehold(f"{user.email} belongs to no household")
+
+    household_id = membership.household_id
+    db.delete(membership)
+    db.flush()
+
+    if not list_members(db, household_id):
+        db.delete(db.get(Household, household_id))
+        db.flush()
+
+
 def update_visibility(
     db: Session,
     user: User,

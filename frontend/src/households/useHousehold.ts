@@ -45,6 +45,23 @@ export function useInvite() {
   })
 }
 
+export function useAcceptInvite() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (token: string) =>
+      api.post<Household>('/households/invites/accept', { token }),
+    onSuccess: (household) => queryClient.setQueryData(['household'], household),
+  })
+}
+
+export function useLeaveHousehold() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: () => api.post('/households/leave', {}),
+    onSuccess: () => queryClient.setQueryData(['household'], null),
+  })
+}
+
 export function useUpdateVisibility() {
   const queryClient = useQueryClient()
   return useMutation({
