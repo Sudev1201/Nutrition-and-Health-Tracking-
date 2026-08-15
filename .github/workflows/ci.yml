@@ -38,3 +38,19 @@ jobs:
           DATABASE_URL: postgresql+psycopg://healthmonitor:healthmonitor@localhost:5433/healthmonitor_test
       - run: uv run pytest -v
         working-directory: backend
+
+  frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: npm ci
+        working-directory: frontend
+      - run: npx tsc --noEmit
+        working-directory: frontend
+      - run: npx vitest run
+        working-directory: frontend
+      - run: npm run build
+        working-directory: frontend
