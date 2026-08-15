@@ -28,5 +28,13 @@ jobs:
         working-directory: backend
       - run: uv run ruff check .
         working-directory: backend
+      - run: uv run alembic upgrade head
+        working-directory: backend
+        env:
+          DATABASE_URL: postgresql+psycopg://healthmonitor:healthmonitor@localhost:5433/healthmonitor_test
+      - run: uv run alembic check
+        working-directory: backend
+        env:
+          DATABASE_URL: postgresql+psycopg://healthmonitor:healthmonitor@localhost:5433/healthmonitor_test
       - run: uv run pytest -v
         working-directory: backend
