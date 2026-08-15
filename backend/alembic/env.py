@@ -4,8 +4,7 @@ from sqlalchemy import engine_from_config, pool
 
 from alembic import context
 from app.config import settings
-from app.models import user  # noqa: F401  — imported so Alembic sees the table
-from app.models.base import Base
+from app.models import Base  # the registry import — pulls in every model
 
 config = context.config
 config.set_main_option("sqlalchemy.url", settings.database_url)

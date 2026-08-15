@@ -5,7 +5,7 @@ from sqlalchemy.orm import Session
 
 from app.config import settings
 from app.main import app
-from app.models.base import Base
+from app.models import Base  # the registry import — pulls in every model
 
 
 @pytest.fixture(scope="session")
