@@ -246,6 +246,12 @@ RDA_ROWS: list[tuple] = [
 ]
 
 # (nutrient, value, supplemental_only, source)
+#
+# No age band. Both sources publish a single adult TUL per nutrient with no
+# elderly split, unlike the RDAs above where 60+ genuinely differs for calcium
+# and vitamin D. `upper_limits` therefore has no age column at all -- see
+# app.models.reference.UpperLimit for why encoding that as the string "adult"
+# was worse than encoding it as an absence.
 UPPER_LIMIT_ROWS: list[tuple] = [
     ("iron", 45, False, ICMR_TUL),
     ("zinc", 40, False, ICMR_TUL),
@@ -297,13 +303,11 @@ def seed_reference(db: Session) -> tuple[int, int]:
         nutrient = nutrients.get(code)
         if nutrient is None:
             continue
-        row = db.scalar(
-            select(UpperLimit).where(
-                UpperLimit.nutrient_id == nutrient.id, UpperLimit.age_band == "adult"
-            )
-        )
+        # One row per nutrient: the published ULs are adult figures with no
+        # age split, and the table says so by having no age column at all.
+        row = db.scalar(select(UpperLimit).where(UpperLimit.nutrient_id == nutrient.id))
         if row is None:
-            row = UpperLimit(nutrient_id=nutrient.id, age_band="adult")
+            row = UpperLimit(nutrient_id=nutrient.id)
             db.add(row)
         row.value, row.supplemental_only, row.source = value, supplemental_only, source
 

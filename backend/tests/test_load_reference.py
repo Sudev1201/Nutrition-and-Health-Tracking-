@@ -3,7 +3,7 @@ import pytest
 from app.models.nutrient import Nutrient
 from app.models.reference import RdaReference, UpperLimit
 from etl.load_nutrients import seed_nutrients
-from etl.load_reference import RDA_ROWS, seed_reference
+from etl.load_reference import RDA_ROWS, UPPER_LIMIT_ROWS, seed_reference
 
 
 def _rda(db, nutrient_code, sex, activity=None, age_band="18-59"):
@@ -124,6 +124,37 @@ def test_nutrients_icmr_left_open_have_no_upper_limit(db):
         assert (
             db.query(UpperLimit).join(Nutrient).filter(Nutrient.code == code).count() == 0
         )
+
+
+def test_an_upper_limit_resolves_for_every_age_band_the_rdas_use(db):
+    """`upper_limits` used to carry an `age_band` defaulting to "adult" while
+    `rda_reference` holds "18-59" / "60+" -- one column name, two vocabularies
+    that never meet, so plan 3 resolving a 60+ user would find an RDA and zero
+    upper limits on what looked like the same key. The limits genuinely have
+    no age dimension, so the table now has no such column, and this pins that
+    a lookup by nutrient alone answers for every band the RDAs define.
+    """
+    seed_nutrients(db)
+    seed_reference(db)
+
+    assert not hasattr(UpperLimit, "age_band")
+
+    bands = {band for (band,) in db.query(RdaReference.age_band).distinct()}
+    assert bands == {"18-59", "60+"}
+
+    capped = {code for code, *_ in UPPER_LIMIT_ROWS}
+    for band in bands:
+        nutrients_with_an_rda = {
+            code
+            for (code,) in db.query(Nutrient.code)
+            .join(RdaReference, RdaReference.nutrient_id == Nutrient.id)
+            .filter(RdaReference.age_band == band)
+            .distinct()
+        }
+        for code in nutrients_with_an_rda & capped:
+            assert (
+                db.query(UpperLimit).join(Nutrient).filter(Nutrient.code == code).count() == 1
+            ), f"{code} has no upper limit resolvable for {band}"
 
 
 def test_iron_upper_limit_is_the_indian_value(db):
