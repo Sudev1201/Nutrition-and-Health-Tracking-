@@ -1,10 +1,12 @@
 from pathlib import Path
+from unittest.mock import patch
 
 import openpyxl
 import pytest
 
 from app.models.food import Dish, DishNutrient, PortionMeasure
 from app.models.nutrient import Nutrient
+from etl.common import ColumnMapUnresolved
 from etl.load_indb import INDB_COLUMN_MAP, load_indb
 from etl.load_nutrients import seed_nutrients
 
@@ -95,6 +97,29 @@ def test_a_zero_calorie_row_does_not_crash_or_produce_a_portion(db, indb_workboo
     assert loaded == 2
     dish = db.query(Dish).filter_by(code="indb:W001").one()
     assert db.query(PortionMeasure).filter_by(dish_id=dish.id).count() == 0
+
+
+def test_free_sugar_is_imported_for_reference_dishes(db, indb_workbook):
+    """INDB publishes free sugar directly, and it is a tracked cap."""
+    assert INDB_COLUMN_MAP["freesugar_g"] == ("free_sugar", "g")
+
+
+def test_a_column_map_typo_is_a_loud_failure(db, indb_workbook):
+    """A single unresolved entry used to be skipped silently for all 1,014
+    rows -- the same mechanism that hid the missing IFCT free-sugar mapping."""
+    seed_nutrients(db)
+
+    with (
+        pytest.raises(ColumnMapUnresolved, match="unseeded nutrient codes"),
+        patch.dict(INDB_COLUMN_MAP, {"calcium_mg": ("calcuim", "mg")}),
+    ):
+        load_indb(db, indb_workbook)
+
+    with (
+        pytest.raises(ColumnMapUnresolved, match="columns absent from the source"),
+        patch.dict(INDB_COLUMN_MAP, {"ca": ("calcium", "mg")}),
+    ):
+        load_indb(db, indb_workbook)
 
 
 def test_reloading_does_not_duplicate(db, indb_workbook):

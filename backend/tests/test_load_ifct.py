@@ -1,12 +1,21 @@
 from collections import defaultdict
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 
 from app.models.food import Ingredient, IngredientNutrient
 from app.models.nutrient import Nutrient
-from etl.common import cached_download
-from etl.load_ifct import ATWATER_MIN_KCAL, ATWATER_SOURCE, IFCT_URL, load_ifct
+from etl.common import ColumnMapUnresolved, cached_download
+from etl.load_ifct import (
+    ATWATER_MIN_KCAL,
+    ATWATER_SOURCE,
+    IFCT_COLUMN_MAP,
+    IFCT_URL,
+    INTRINSIC_SUGAR_SOURCE,
+    OXALATE_CLASS,
+    load_ifct,
+)
 from etl.load_nutrients import seed_nutrients
 
 FIXTURE = Path(__file__).parent / "fixtures" / "ifct_sample.csv"
@@ -35,8 +44,8 @@ def test_loads_every_row(db):
 
     count = load_ifct(db, FIXTURE)
 
-    assert count == 5
-    assert db.query(Ingredient).filter_by(source="IFCT").count() == 5
+    assert count == 6
+    assert db.query(Ingredient).filter_by(source="IFCT").count() == 6
 
 
 def test_energy_is_converted_from_kilojoules_to_kcal(db):
@@ -96,6 +105,93 @@ def test_b12_and_iodine_are_absent_from_ifct(db):
             .count()
             == 0
         )
+
+
+def test_a_sugars_group_food_takes_its_free_sugar_from_ifct(db):
+    """Jaggery IS free sugar: the whole 84.32 g counts."""
+    seed_nutrients(db)
+
+    load_ifct(db, FIXTURE)
+
+    assert _value(db, "ifct:I001", "free_sugar") == pytest.approx(84.32)
+    assert _source(db, "ifct:I001", "free_sugar") == "IFCT"
+
+
+def test_intrinsic_sugars_are_an_explicit_zero_not_the_total_sugar_figure(db):
+    """IFCT's `fsugar` is TOTAL sugars. Milk's lactose and an apple's fructose
+    are intrinsic, so free sugar is 0 -- asserted, with a tag saying why, not
+    copied from a column that would overstate every fruit and dairy food."""
+    seed_nutrients(db)
+
+    load_ifct(db, FIXTURE)
+
+    for code in ("ifct:D005", "ifct:E001", "ifct:A001"):
+        assert _value(db, code, "free_sugar") == 0.0, code
+        assert _source(db, code, "free_sugar") == INTRINSIC_SUGAR_SOURCE, code
+
+
+def test_free_sugar_zero_is_written_for_every_food_in_the_real_dataset(db):
+    """The defect this closes: free_sugar had no IFCT mapping at all, so 542
+    foods carried no row and every authored dish's free sugar was either
+    missing or a hard zero it had not earned. Every food must now carry a
+    figure, and only the Sugars group and the one juice row may be non-zero.
+    """
+    seed_nutrients(db)
+    load_ifct(db, cached_download(IFCT_URL, "ifct_compositions.csv"))
+
+    rows = (
+        db.query(Ingredient.code, Ingredient.food_group, IngredientNutrient.per_100g)
+        .join(IngredientNutrient, IngredientNutrient.ingredient_id == Ingredient.id)
+        .join(Nutrient, Nutrient.id == IngredientNutrient.nutrient_id)
+        .filter(Nutrient.code == "free_sugar")
+        .all()
+    )
+
+    assert len(rows) == db.query(Ingredient).filter_by(source="IFCT").count()
+    non_zero = {code: group for code, group, value in rows if value > 0}
+    assert non_zero == {
+        "ifct:I001": "Sugars",  # Jaggery, cane
+        "ifct:I002": "Sugars",  # Sugarcane, juice
+        "ifct:E033": "Fruits",  # Lemon, juice -- a pressed juice is free sugar
+    }
+
+
+def test_the_spec_named_greens_carry_an_oxalate_class(db):
+    """Spec design doc 437-441: "all keerai is calcium" is wrong. Palak and
+    arai keerai are high-oxalate, murungai keerai and curry leaf are not."""
+    seed_nutrients(db)
+    load_ifct(db, cached_download(IFCT_URL, "ifct_compositions.csv"))
+
+    classes = dict(
+        db.query(Ingredient.code, Ingredient.oxalate_class)
+        .filter(Ingredient.oxalate_class.isnot(None))
+        .all()
+    )
+
+    assert classes == {f"ifct:{code}": value for code, value in OXALATE_CLASS.items()}
+    assert classes["ifct:C033"] == "high"  # Spinach (palak)
+    assert classes["ifct:C002"] == "high"  # Amaranth leaves, green (arai keerai)
+    assert classes["ifct:C019"] == "low"  # Drumstick leaves (murungai keerai)
+    assert classes["ifct:G010"] == "low"  # Curry leaves
+
+
+def test_a_column_map_typo_is_a_loud_failure(db, tmp_path):
+    """The mechanism that hid the missing free-sugar mapping for a whole plan:
+    an unresolved column was skipped silently, one nutrient at a time, across
+    every row. load_recipes already raises on the analogous condition."""
+    seed_nutrients(db)
+
+    with (
+        pytest.raises(ColumnMapUnresolved, match="unseeded nutrient codes"),
+        patch.dict(IFCT_COLUMN_MAP, {"ca": ("calcuim", "g")}),
+    ):
+        load_ifct(db, FIXTURE)
+
+    with (
+        pytest.raises(ColumnMapUnresolved, match="columns absent from the source"),
+        patch.dict(IFCT_COLUMN_MAP, {"calcium_mg": ("calcium", "g")}),
+    ):
+        load_ifct(db, FIXTURE)
 
 
 def test_loading_twice_does_not_duplicate(db):

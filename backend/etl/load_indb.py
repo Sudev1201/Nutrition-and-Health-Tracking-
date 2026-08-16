@@ -44,7 +44,7 @@ INDB_COLUMN_MAP: dict[str, tuple[str, str]] = {
 
 
 def load_indb(db: Session, xlsx_path: Path) -> int:
-    from etl.common import to_canonical
+    from etl.common import require_column_map, to_canonical
 
     nutrients = {n.code: n for n in db.scalars(select(Nutrient))}
     workbook = openpyxl.load_workbook(xlsx_path, read_only=True)
@@ -52,38 +52,46 @@ def load_indb(db: Session, xlsx_path: Path) -> int:
 
     rows = sheet.iter_rows(values_only=True)
     header = {name: index for index, name in enumerate(next(rows))}
+    # Before a single row is read: a typo on either side of this map used to
+    # drop one nutrient from all 1,014 reference dishes without a murmur.
+    require_column_map("INDB_COLUMN_MAP", INDB_COLUMN_MAP, set(nutrients), set(header))
+
+    # Read once instead of once per dish per nutrient: 1,014 x 30 round trips.
+    dishes_by_code = {dish.code: dish for dish in db.scalars(select(Dish))}
+    dish_values = {
+        (value.dish_id, value.nutrient_id): value for value in db.scalars(select(DishNutrient))
+    }
+    measures = {
+        (measure.dish_id, measure.measure_name)
+        for measure in db.scalars(select(PortionMeasure))
+    }
     loaded = 0
 
     for row in rows:
         code = f"indb:{row[header['food_code']]}"
-        dish = db.scalar(select(Dish).where(Dish.code == code))
+        dish = dishes_by_code.get(code)
         if dish is None:
             # Not editable: INDB ships no ingredient breakdown, so these are
             # reference entries and their intake counts as estimated.
             dish = Dish(code=code, source="INDB", is_editable=False)
             db.add(dish)
+            dishes_by_code[code] = dish
         dish.name = row[header["food_name"]]
         db.flush()
 
         for column, (nutrient_code, unit) in INDB_COLUMN_MAP.items():
-            nutrient = nutrients.get(nutrient_code)
-            value = row[header[column]] if column in header else None
-            if nutrient is None or value in (None, ""):
+            nutrient = nutrients[nutrient_code]
+            value = row[header[column]]
+            if value in (None, ""):
                 continue
 
-            existing = db.scalar(
-                select(DishNutrient).where(
-                    DishNutrient.dish_id == dish.id,
-                    DishNutrient.nutrient_id == nutrient.id,
-                )
-            )
+            existing = dish_values.get((dish.id, nutrient.id))
             converted = to_canonical(float(value), unit, nutrient.unit)
             if existing is None:
-                db.add(
-                    DishNutrient(
-                        dish_id=dish.id, nutrient_id=nutrient.id, per_100g=converted
-                    )
+                dish_values[(dish.id, nutrient.id)] = DishNutrient(
+                    dish_id=dish.id, nutrient_id=nutrient.id, per_100g=converted
                 )
+                db.add(dish_values[(dish.id, nutrient.id)])
             else:
                 existing.per_100g = converted
 
@@ -96,12 +104,8 @@ def load_indb(db: Session, xlsx_path: Path) -> int:
         # those rows rather than derived from a meaningless ratio.
         if serving_unit and serving_kcal and per_100g_kcal:
             grams = float(serving_kcal) * 100.0 / float(per_100g_kcal)
-            if not db.scalar(
-                select(PortionMeasure).where(
-                    PortionMeasure.dish_id == dish.id,
-                    PortionMeasure.measure_name == serving_unit,
-                )
-            ):
+            if (dish.id, str(serving_unit)) not in measures:
+                measures.add((dish.id, str(serving_unit)))
                 db.add(
                     PortionMeasure(
                         dish_id=dish.id,

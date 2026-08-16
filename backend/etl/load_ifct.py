@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 
 from app.models.food import Ingredient, IngredientNutrient
 from app.models.nutrient import Nutrient
-from etl.common import to_canonical
+from etl.common import require_column_map, to_canonical
 
 IFCT_URL = (
     "https://raw.githubusercontent.com/ifct2017/compositions/master/compositions/index.csv"
@@ -45,7 +45,74 @@ IFCT_COLUMN_MAP: dict[str, tuple[str, str]] = {
     "biot": ("biotin", "g"),
     "folsum": ("folate", "g"),
     "vitc": ("vitamin_c", "g"),
+    # NOT a straight copy -- see _resolve_free_sugar. IFCT's `fsugar` is TOTAL
+    # sugars; free sugar is a subset of it.
+    "fsugar": ("free_sugar", "g"),
     # Deliberately absent from IFCT: vitamin_b12, iodine. Sourced from USDA.
+}
+
+# Foods whose total sugars ARE free sugars. WHO/ICMR define free sugars as all
+# mono- and disaccharides added by manufacturer, cook or consumer, PLUS the
+# sugars naturally present in honey, syrups and fruit juices. IFCT's Sugars
+# group is exactly that: jaggery (ifct:I001, 84.32 g/100 g) and cane juice
+# (ifct:I002, 12.85). IFCT has no honey or syrup row.
+FREE_SUGAR_GROUPS = frozenset({"Sugars"})
+
+# The one fruit-juice row outside that group. IFCT files "Lemon, juice" under
+# Fruits, but a pressed juice is free sugar by the definition above, whole
+# lemons are not. Named individually rather than by group precisely because
+# the rest of the Fruits group must NOT be swept in with it.
+FREE_SUGAR_CODES = frozenset({"E033"})
+
+# Everything else gets an explicit zero, not a null. `fsugar` is populated for
+# all 542 rows and is non-zero for 314 of them, but those are the food's own
+# intrinsic sugars -- milk's lactose (4.89), an apple's fructose (9.53), even
+# milled rice (0.69) -- and intrinsic sugars are categorically not free sugars.
+# Copying the column wholesale would overstate free sugar across every fruit,
+# vegetable and dairy food in the database, and would contradict the ruling
+# already encoded for usda:curd, whose free-sugar row is 0 tagged
+# derived:lactose-not-free.
+#
+# The zero is explicit for the same reason etl/load_usda.py writes an explicit
+# zero for plant-source B12: free_sugar is an excess-sensitive tracked cap, and
+# "this food has no free sugar" has to be distinguishable from "nobody looked".
+# Only the second of those may ever suppress a cap.
+#
+# Two rows considered and deliberately left at the explicit zero:
+# - ifct:K001 Toddy (5.73) and ifct:K002 Coconut water (3.06). Both are the
+#   plant's own sap/liquid endosperm drunk as it comes, not a juice pressed
+#   out of fruit flesh, so their sugars stay intrinsic.
+INTRINSIC_SUGAR_SOURCE = "derived:intrinsic-sugar-zero"
+
+# Oxalate class, spec 2026-08-15 design doc lines 437-441 and 545-546: total
+# oxalate binds calcium in the gut, so "all keerai is calcium" is wrong.
+# Absorption from spinach is ~5% against ~28-32% from milk, and plan 3's
+# calcium maths has to be able to say so. "high" = high total (largely soluble)
+# oxalate, calcium mostly unavailable; "low" = insoluble-oxalate-only greens
+# whose calcium is genuinely usable.
+#
+# Deliberately small and explicit, in the same discipline as
+# etl.load_usda.CURATED_ANIMAL_MAP: every entry is a food the spec names, and
+# NULL keeps meaning "not classified", which the app must treat as unknown
+# rather than as "low". IFCT has a row for every food the spec names; nothing
+# was dropped for want of a code.
+OXALATE_CLASS: dict[str, str] = {
+    # High total oxalate. Arai/mulai keerai is Amaranthus -- all five IFCT
+    # amaranth-leaf rows are the same genus and the same ruling applies to
+    # each, so classifying only the one the recipes happen to use would leave
+    # the other four reading as unclassified.
+    "C002": "high",  # Amaranth leaves, green (arai keerai)
+    "C003": "high",  # Amaranth leaves, red
+    "C004": "high",  # Amaranth leaves, red and green
+    "C005": "high",  # Amaranth, spinous, leaves, green (mulai keerai)
+    "C006": "high",  # Amaranth, spinous, leaves, red and green
+    "C033": "high",  # Spinach (palak)
+    "C018": "high",  # Colocasia leaves, green
+    # Insoluble oxalate only -- the greens that genuinely deliver calcium.
+    "C019": "low",  # Drumstick leaves (murungai keerai)
+    "C020": "low",  # Fenugreek leaves (methi)
+    "G009": "low",  # Coriander leaves
+    "G010": "low",  # Curry leaves
 }
 
 # Atwater general factors, kcal per gram of each macronutrient.
@@ -109,13 +176,41 @@ def _resolve_energy(row: dict, nutrient: Nutrient) -> tuple[float, str] | None:
     return None if published is None else (published, "IFCT")
 
 
+def _resolve_free_sugar(row: dict, nutrient: Nutrient) -> tuple[float, str] | None:
+    """IFCT's total-sugar figure where total sugar IS free sugar, and an
+    explicit, asserted zero everywhere else. See FREE_SUGAR_GROUPS.
+
+    Returns None only when a free-sugar food publishes no figure at all, in
+    which case free_sugar stays NULL -- unknown reads as unknown.
+    """
+    if row.get("grup") in FREE_SUGAR_GROUPS or row.get("code") in FREE_SUGAR_CODES:
+        raw = row.get("fsugar")
+        if raw in (None, "", "-"):
+            return None
+        return to_canonical(float(raw), "g", nutrient.unit), "IFCT"
+
+    return 0.0, INTRINSIC_SUGAR_SOURCE
+
+
 def load_ifct(db: Session, csv_path: Path) -> int:
     nutrients = {n.code: n for n in db.scalars(select(Nutrient))}
     existing = {i.code: i for i in db.scalars(select(Ingredient))}
+    # Every (ingredient, nutrient) row already stored, read once. The previous
+    # version issued one SELECT per nutrient per food -- 542 x 30 round trips
+    # per load, which is where six minutes of this suite's runtime went.
+    existing_values = {
+        (value.ingredient_id, value.nutrient_id): value
+        for value in db.scalars(select(IngredientNutrient))
+    }
     loaded = 0
 
     with Path(csv_path).open(newline="", encoding="utf-8") as handle:
-        for row in csv.DictReader(handle):
+        reader = csv.DictReader(handle)
+        require_column_map(
+            "IFCT_COLUMN_MAP", IFCT_COLUMN_MAP, set(nutrients), set(reader.fieldnames or [])
+        )
+
+        for row in reader:
             code = f"ifct:{row['code']}"
             ingredient = existing.get(code)
 
@@ -127,42 +222,40 @@ def load_ifct(db: Session, csv_path: Path) -> int:
             ingredient.food_group = row.get("grup") or None
             ingredient.diet_tags = row.get("tags") or None
             ingredient.search_aliases = row.get("lang") or None
+            ingredient.oxalate_class = OXALATE_CLASS.get(row["code"])
             db.flush()
 
             for column, (nutrient_code, source_unit) in IFCT_COLUMN_MAP.items():
-                nutrient = nutrients.get(nutrient_code)
-                if nutrient is None:
-                    continue
+                nutrient = nutrients[nutrient_code]
 
-                # Energy is the one column that is not a straight conversion --
-                # IFCT publishes false zeros for every oil and fat.
+                # Two columns are not straight conversions: IFCT publishes
+                # false zero energy for every oil and fat, and its sugar column
+                # is total sugars where we track free sugars.
                 if nutrient_code == "energy":
                     resolved = _resolve_energy(row, nutrient)
-                    if resolved is None:
-                        continue
-                    value, value_source = resolved
+                elif nutrient_code == "free_sugar":
+                    resolved = _resolve_free_sugar(row, nutrient)
                 else:
                     raw = row.get(column)
-                    if raw in (None, "", "-"):
-                        continue
-                    value = to_canonical(float(raw), source_unit, nutrient.unit)
-                    value_source = "IFCT"
+                    resolved = (
+                        None
+                        if raw in (None, "", "-")
+                        else (to_canonical(float(raw), source_unit, nutrient.unit), "IFCT")
+                    )
 
-                existing_value = db.scalar(
-                    select(IngredientNutrient).where(
-                        IngredientNutrient.ingredient_id == ingredient.id,
-                        IngredientNutrient.nutrient_id == nutrient.id,
-                    )
-                )
+                if resolved is None:
+                    continue
+                value, value_source = resolved
+
+                existing_value = existing_values.get((ingredient.id, nutrient.id))
                 if existing_value is None:
-                    db.add(
-                        IngredientNutrient(
-                            ingredient_id=ingredient.id,
-                            nutrient_id=nutrient.id,
-                            per_100g=value,
-                            source=value_source,
-                        )
+                    existing_values[(ingredient.id, nutrient.id)] = IngredientNutrient(
+                        ingredient_id=ingredient.id,
+                        nutrient_id=nutrient.id,
+                        per_100g=value,
+                        source=value_source,
                     )
+                    db.add(existing_values[(ingredient.id, nutrient.id)])
                 else:
                     existing_value.per_100g = value
                     # Re-running has to be able to CORRECT a row, provenance
