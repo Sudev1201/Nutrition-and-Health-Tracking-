@@ -18,12 +18,16 @@ Step order is dependency-driven, not alphabetical or file-creation order:
 
 One commit at the end: a failure partway through should leave the previous
 run's data untouched rather than a half-loaded database.
+
+One run at a time: see ETL_LOCK_KEY.
 """
 
 import zipfile
 from pathlib import Path
 
-from app.db import SessionLocal
+from sqlalchemy import text
+
+from app.db import SessionLocal, engine
 from etl.common import cached_download
 from etl.load_ifct import IFCT_URL, load_ifct
 from etl.load_indb import INDB_URL, load_indb
@@ -35,6 +39,31 @@ from etl.load_usda import USDA_URL, load_usda_gapfill
 from etl.recipes.south_indian import RECIPES
 
 USDA_CSV_DIRNAME = "FoodData_Central_foundation_food_csv_2025-04-24"
+
+# Arbitrary but fixed: any two orchestrator runs must pick the SAME number for
+# the lock to mean anything. Postgres advisory locks share one namespace per
+# database, so this reads as "the food ETL", 2026-08-16 being the plan date.
+ETL_LOCK_KEY = 20260816
+
+
+def _lock_connection():
+    """A connection of its own, held for the whole run, just to own the lock.
+
+    `pg_advisory_lock` is *session*-scoped -- it belongs to the backend
+    connection, not the transaction -- so it cannot ride on the ETL session:
+    that session returns its connection to the pool at `commit()`, and the
+    unlock could then land on a different backend and silently do nothing,
+    leaking the lock until the pool recycled it. A dedicated connection makes
+    lock and unlock provably the same backend, and lets the lock outlive the
+    commit, which is the point: the whole write, commit included, has to be
+    inside it.
+
+    The defect this closes is not theoretical. Two orchestrator runs
+    interleaving their un-serialised writes left orphan rows behind, and the
+    resulting inconsistency was diagnosed as a loader bug that did not exist,
+    costing this plan a wasted investigation.
+    """
+    return engine.connect()
 
 
 def _usda_csv_paths() -> tuple[Path, Path, Path]:
@@ -56,6 +85,22 @@ def _usda_csv_paths() -> tuple[Path, Path, Path]:
 
 
 def main() -> None:
+    lock = _lock_connection()
+    try:
+        # Blocks rather than failing: a second run should wait its turn and
+        # then re-seed idempotently, which is what a developer re-running this
+        # expects.
+        lock.execute(text("select pg_advisory_lock(:key)"), {"key": ETL_LOCK_KEY})
+        _load_everything()
+    finally:
+        # After the commit inside _load_everything, so the next run in the
+        # queue never sees a half-written database.
+        lock.execute(text("select pg_advisory_unlock(:key)"), {"key": ETL_LOCK_KEY})
+        lock.commit()
+        lock.close()
+
+
+def _load_everything() -> None:
     db = SessionLocal()
     try:
         print("nutrients:", seed_nutrients(db))
