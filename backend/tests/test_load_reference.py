@@ -53,6 +53,33 @@ def test_b_vitamins_are_indexed_by_activity(db):
     assert sedentary.rda < moderate.rda
 
 
+@pytest.mark.parametrize(
+    "nutrient_code,sex",
+    [
+        ("thiamine", "male"),
+        ("thiamine", "female"),
+        ("riboflavin", "male"),
+        ("riboflavin", "female"),
+        ("niacin", "male"),
+        ("niacin", "female"),
+        ("vitamin_b6", "male"),
+        ("vitamin_b6", "female"),
+    ],
+)
+def test_sedentary_is_always_below_moderate_below_heavy(db, nutrient_code, sex):
+    """Regression for a data bug where female vitamin_b6 sedentary (1.9) was
+    seeded identical to its own moderate value — this must hold for all four
+    energy-scaled B vitamins and both sexes, not just one nutrient/sex pair."""
+    seed_nutrients(db)
+    seed_reference(db)
+
+    sedentary = _rda(db, nutrient_code, sex, activity="sedentary")
+    moderate = _rda(db, nutrient_code, sex, activity="moderate")
+    heavy = _rda(db, nutrient_code, sex, activity="heavy")
+
+    assert sedentary.rda < moderate.rda < heavy.rda
+
+
 def test_elderly_calcium_and_vitamin_d_rise(db):
     seed_nutrients(db)
     seed_reference(db)

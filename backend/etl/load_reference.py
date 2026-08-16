@@ -39,8 +39,14 @@ work"/moderate-activity figures):
     vitamin_a (M/F EAR+RDA), vitamin_d (M/F RDA, 18-59 band only),
     folate (M/F EAR+RDA), vitamin_b12 (M/F EAR+RDA), vitamin_c (M/F EAR+RDA),
     and the "moderate" activity row for thiamine, riboflavin, niacin and
-    vitamin_b6 (M/F) — Table 3/4 print exactly one figure per B-vitamin per
-    sex, and it matches this file's "moderate" row in every case.
+    vitamin_b6 (M/F) — Table 3/4 print exactly one RDA-2020 figure per
+    B-vitamin per sex, and it matches this file's "moderate" row in every
+    case. The same tables' EAR-2020 column also confirmed, exactly: thiamine
+    EAR 1.5/1.4 (M/F), riboflavin 2.1/2.0, niacin 15/12, vitamin_b6 2.1/1.6,
+    and vitamin D EAR 400 IU = 10 ug (both sexes) — these are the values
+    added in Fix round 1 below (Finding 3), and they were sitting in this
+    same PDF the whole time; the first pass simply hadn't transcribed the
+    EAR column for these five nutrients.
 
   NOT covered by the brief note, and NOT independently re-confirmed against a
   freely-available primary source in this pass (the underlying ICMR-NIN 2020
@@ -52,13 +58,6 @@ work"/moderate-activity figures):
       split.
     * Protein's 60+ rows, which reuse the 18-59 figures.
     * sodium / potassium / selenium AI values — absent from the brief note.
-    * The sedentary and heavy variants of thiamine/riboflavin/niacin/B6 — only
-      a single (moderate) column is printed. As a plausibility check, the
-      ratios between the sedentary/moderate/heavy figures given here track the
-      sedentary/moderate/heavy energy ratios in the brief note's Table 1a
-      (e.g. men's thiamine 1.4 : 1.8 : 2.3 vs. energy 2110 : 2710 : 3470 kcal —
-      the same ~0.78 / ~1.28 ratios), which is consistent but not a direct
-      table lookup.
     * All of UPPER_LIMIT_ROWS — the ICMR 2018 TUL committee report was not
       accessible in this session.
   These rows are kept exactly as specified (values and source tags
@@ -69,6 +68,58 @@ work"/moderate-activity figures):
   confirmed them as intentional rather than transcription errors. None are
   marked "UNVERIFIED" because that would both contradict the ruling and break
   the tests that assert their exact source tags.
+
+Fix round 1 (2026-08-16) — three defects found in the transcribed data itself
+------------------------------------------------------------------------------
+A review of the seeded data (not of this loader's logic) found:
+
+  Finding 1 (Critical) — female vitamin_b6 sedentary was seeded as 1.9,
+  identical to its own moderate value, violating the invariant that sedentary
+  must sit strictly below moderate — the only one of the 8 B-vitamin
+  nutrient/sex pairs where that held. The brief note has no sedentary/heavy
+  breakdown for any B vitamin (only the moderate column is published; see
+  above), and every other sedentary row in this file sits at ~0.78-0.83x its
+  moderate figure, matching ICMR's own sedentary:moderate PAL ratio of
+  1.40/1.80 = 0.779. Fixed by setting it to 1.9 x 0.779 = 1.48, rounded to 1.5
+  to match the precision of its neighbours. Moderate (1.9) and heavy (2.4)
+  were untouched.
+
+  Finding 2 (provenance) — because every sedentary/heavy row in this block is
+  derived from the published moderate figure via that PAL ratio rather than
+  read off a table, they are now tagged `ICMR_DERIVED`
+  ("ICMR-NIN-2020-derived") instead of the plain `ICMR` tag. Only the
+  moderate rows — the ones Table 3/4 actually print — keep the plain
+  ICMR-NIN-2020 tag. The derivation basis: ICMR's physical activity level
+  (PAL) for adults is 1.40 (sedentary) / 1.80 (moderate) / 2.30 (heavy); the
+  sedentary and heavy RDA for each B vitamin/sex is the moderate figure
+  scaled by (sedentary or heavy PAL) / (moderate PAL) and rounded to one
+  decimal place. This mirrors how the postmenopausal iron row carries `IOM`
+  rather than pretending to be ICMR — a distinct tag wherever the number
+  didn't come directly off a published ICMR table.
+
+  Finding 3 (Important) — thiamine, riboflavin, niacin, vitamin_b6 and
+  vitamin_d all have a published EAR in Table 3/4, but every row for these
+  five had been seeded with ear=None, leaving the adequacy floor undefined
+  for exactly the nutrients the compensation engine most needs it for. Added
+  from the EAR-2020 column (see "CONFIRMED" above). Row placement: the
+  brief note's EAR is not stratified by activity level (one number per
+  nutrient per sex, unlike RDA which has a distinct figure per PAL band), so
+  the same published EAR is attached to all three activity rows (sedentary/
+  moderate/heavy) for a given nutrient and sex — the floor a target must
+  never be pushed below doesn't change with which activity band the target
+  itself uses. Vitamin D's EAR (10 ug) likewise has no age-band split in the
+  source, so it is attached to both the 18-59 and 60+ rows for both sexes.
+  One consequence worth flagging: the sedentary/heavy B-vitamin rows now
+  carry a directly-published EAR alongside a PAL-derived RDA under the same
+  `source` tag. The schema has one `source` field per row, not one per
+  column, and `ICMR_DERIVED` was chosen to describe the row's RDA (the
+  figure Finding 1/2 were about) — it is not a claim that every number on
+  that row was extrapolated.
+
+  Finding 4 (test coverage) — `test_b_vitamins_are_indexed_by_activity` only
+  pinned the sedentary < moderate invariant for thiamine/male, which is how
+  Finding 1 passed silently. Extended to check all four B vitamins x both
+  sexes.
 """
 
 from sqlalchemy import select
@@ -78,6 +129,12 @@ from app.models.nutrient import Nutrient
 from app.models.reference import RdaReference, UpperLimit
 
 ICMR = "ICMR-NIN-2020"
+# The brief note publishes only the moderate-activity RDA for the four
+# energy-scaled B vitamins. Sedentary/heavy figures are extrapolated from it
+# via ICMR's own PAL ratios (sedentary 1.40 / moderate 1.80 / heavy 2.30 —
+# see the docstring's "Fix round 1" section) rather than read off a table, so
+# they carry this distinct tag instead of pretending to be a published value.
+ICMR_DERIVED = "ICMR-NIN-2020-derived"
 ICMR_TUL = "ICMR-2018-TUL"
 IOM = "IOM"
 
@@ -118,10 +175,12 @@ RDA_ROWS: list[tuple] = [
 
     ("vitamin_a", "male", "18-59", None, 460, 1000, None, ICMR),
     ("vitamin_a", "female", "18-59", None, 390, 840, None, ICMR),
-    ("vitamin_d", "male", "18-59", None, None, 15, None, ICMR),   # 600 IU
-    ("vitamin_d", "female", "18-59", None, None, 15, None, ICMR),
-    ("vitamin_d", "male", "60+", None, None, 20, None, ICMR),     # 800 IU
-    ("vitamin_d", "female", "60+", None, None, 20, None, ICMR),
+    # EAR 2020 = 10 ug (400 IU) — the brief note gives one EAR figure with no
+    # age-band split, so it is applied to both the 18-59 and 60+ rows below.
+    ("vitamin_d", "male", "18-59", None, 10, 15, None, ICMR),   # 600 IU
+    ("vitamin_d", "female", "18-59", None, 10, 15, None, ICMR),
+    ("vitamin_d", "male", "60+", None, 10, 20, None, ICMR),     # 800 IU
+    ("vitamin_d", "female", "60+", None, 10, 20, None, ICMR),
     ("folate", "male", "18-59", None, 250, 300, None, ICMR),
     ("folate", "female", "18-59", None, 180, 220, None, ICMR),
     ("vitamin_b12", "male", "18-59", None, 2.0, 2.2, None, ICMR),
@@ -129,31 +188,41 @@ RDA_ROWS: list[tuple] = [
     ("vitamin_c", "male", "18-59", None, 65, 80, None, ICMR),
     ("vitamin_c", "female", "18-59", None, 55, 65, None, ICMR),
 
-    # Energy-scaled B vitamins, by activity level.
-    ("thiamine", "male", "18-59", "sedentary", None, 1.4, None, ICMR),
-    ("thiamine", "male", "18-59", "moderate", None, 1.8, None, ICMR),
-    ("thiamine", "male", "18-59", "heavy", None, 2.3, None, ICMR),
-    ("thiamine", "female", "18-59", "sedentary", None, 1.4, None, ICMR),
-    ("thiamine", "female", "18-59", "moderate", None, 1.7, None, ICMR),
-    ("thiamine", "female", "18-59", "heavy", None, 2.2, None, ICMR),
-    ("riboflavin", "male", "18-59", "sedentary", None, 2.0, None, ICMR),
-    ("riboflavin", "male", "18-59", "moderate", None, 2.5, None, ICMR),
-    ("riboflavin", "male", "18-59", "heavy", None, 3.2, None, ICMR),
-    ("riboflavin", "female", "18-59", "sedentary", None, 1.9, None, ICMR),
-    ("riboflavin", "female", "18-59", "moderate", None, 2.4, None, ICMR),
-    ("riboflavin", "female", "18-59", "heavy", None, 3.1, None, ICMR),
-    ("niacin", "male", "18-59", "sedentary", None, 14, None, ICMR),
-    ("niacin", "male", "18-59", "moderate", None, 18, None, ICMR),
-    ("niacin", "male", "18-59", "heavy", None, 23, None, ICMR),
-    ("niacin", "female", "18-59", "sedentary", None, 11, None, ICMR),
-    ("niacin", "female", "18-59", "moderate", None, 14, None, ICMR),
-    ("niacin", "female", "18-59", "heavy", None, 18, None, ICMR),
-    ("vitamin_b6", "male", "18-59", "sedentary", None, 1.9, None, ICMR),
-    ("vitamin_b6", "male", "18-59", "moderate", None, 2.4, None, ICMR),
-    ("vitamin_b6", "male", "18-59", "heavy", None, 3.1, None, ICMR),
-    ("vitamin_b6", "female", "18-59", "sedentary", None, 1.9, None, ICMR),
-    ("vitamin_b6", "female", "18-59", "moderate", None, 1.9, None, ICMR),
-    ("vitamin_b6", "female", "18-59", "heavy", None, 2.4, None, ICMR),
+    # Energy-scaled B vitamins, by activity level. The moderate-activity RDA
+    # (and its matching EAR) is the one figure the brief note actually
+    # publishes; sedentary and heavy are derived from it via ICMR's PAL
+    # ratios (see ICMR_DERIVED above) and tagged accordingly. Each nutrient's
+    # EAR is not activity-stratified in the source, so the same published EAR
+    # is attached to all three activity rows for a given sex — the adequacy
+    # floor does not depend on which activity band a user's target uses.
+    ("thiamine", "male", "18-59", "sedentary", 1.5, 1.4, None, ICMR_DERIVED),
+    ("thiamine", "male", "18-59", "moderate", 1.5, 1.8, None, ICMR),
+    ("thiamine", "male", "18-59", "heavy", 1.5, 2.3, None, ICMR_DERIVED),
+    ("thiamine", "female", "18-59", "sedentary", 1.4, 1.4, None, ICMR_DERIVED),
+    ("thiamine", "female", "18-59", "moderate", 1.4, 1.7, None, ICMR),
+    ("thiamine", "female", "18-59", "heavy", 1.4, 2.2, None, ICMR_DERIVED),
+    ("riboflavin", "male", "18-59", "sedentary", 2.1, 2.0, None, ICMR_DERIVED),
+    ("riboflavin", "male", "18-59", "moderate", 2.1, 2.5, None, ICMR),
+    ("riboflavin", "male", "18-59", "heavy", 2.1, 3.2, None, ICMR_DERIVED),
+    ("riboflavin", "female", "18-59", "sedentary", 2.0, 1.9, None, ICMR_DERIVED),
+    ("riboflavin", "female", "18-59", "moderate", 2.0, 2.4, None, ICMR),
+    ("riboflavin", "female", "18-59", "heavy", 2.0, 3.1, None, ICMR_DERIVED),
+    ("niacin", "male", "18-59", "sedentary", 15, 14, None, ICMR_DERIVED),
+    ("niacin", "male", "18-59", "moderate", 15, 18, None, ICMR),
+    ("niacin", "male", "18-59", "heavy", 15, 23, None, ICMR_DERIVED),
+    ("niacin", "female", "18-59", "sedentary", 12, 11, None, ICMR_DERIVED),
+    ("niacin", "female", "18-59", "moderate", 12, 14, None, ICMR),
+    ("niacin", "female", "18-59", "heavy", 12, 18, None, ICMR_DERIVED),
+    ("vitamin_b6", "male", "18-59", "sedentary", 2.1, 1.9, None, ICMR_DERIVED),
+    ("vitamin_b6", "male", "18-59", "moderate", 2.1, 2.4, None, ICMR),
+    ("vitamin_b6", "male", "18-59", "heavy", 2.1, 3.1, None, ICMR_DERIVED),
+    # Female B6 sedentary was mistranscribed as 1.9 (identical to moderate,
+    # violating sedentary < moderate). Corrected to 1.9 x 0.779 = 1.48 -> 1.5,
+    # the same sedentary:moderate PAL ratio (1.40/1.80) used for every other
+    # row in this block.
+    ("vitamin_b6", "female", "18-59", "sedentary", 1.6, 1.5, None, ICMR_DERIVED),
+    ("vitamin_b6", "female", "18-59", "moderate", 1.6, 1.9, None, ICMR),
+    ("vitamin_b6", "female", "18-59", "heavy", 1.6, 2.4, None, ICMR_DERIVED),
 ]
 
 # (nutrient, value, supplemental_only, source)
