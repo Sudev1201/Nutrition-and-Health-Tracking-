@@ -222,6 +222,89 @@ def test_every_recipe_is_internally_consistent(db):
         )
 
 
+def test_no_dish_is_saltier_than_home_cooking(db):
+    """THE SALT INVARIANT. Salt as a fraction of FINISHED weight, not raw.
+
+    The bug this catches is mechanical, not a matter of taste: salt gets set per
+    raw batch and then a sub-1.0 yield factor concentrates it, so a 110 g
+    vegetable side ends up out-salting a full cup of sambar. Every dish that
+    breached this had that same cause.
+
+    1.2% NaCl of finished weight is the ceiling for food meant to be eaten as a
+    dish. Sambar sits at 0.66%, which is at or below normal palatability, and
+    the modelled day totals ~9.9 g of salt -- squarely inside measured Indian
+    intake of 8-11 g/day. So this is a ceiling on outliers, not a diet.
+
+    Powders and podis are exempt: a spice blend genuinely is that salty, and it
+    is eaten by the teaspoon, not the bowl.
+    """
+    exempt = {r.code for r in RECIPES if r.code.endswith("_powder") or "podi" in r.code}
+
+    too_salty = {}
+    for recipe in RECIPES:
+        if recipe.code in exempt:
+            continue
+        salt = sum(grams for code, grams in recipe.ingredients if code == "manual:salt")
+        if not salt:
+            continue
+        cooked = sum(grams for _, grams in recipe.ingredients) * recipe.yield_factor
+        fraction = salt / cooked
+        if fraction > 0.012:
+            too_salty[recipe.code] = f"{fraction:.2%} ({salt} g in {cooked:.0f} g)"
+
+    assert too_salty == {}
+
+
+def test_the_default_portion_is_the_smaller_reviewed_one_for_chutneys(db):
+    """measures[0] becomes is_default, and the reviewed document bolds 2 tbsp.
+
+    Called out separately because ordering is invisible at a glance: nothing
+    about `measures=[("1 serving", 80.0), ("2 tbsp", 40.0)]` looks wrong, yet it
+    silently doubles what every chutney tap logs.
+    """
+    for code, expected in [
+        ("si:chutney_coconut", ("2 tbsp", 40.0)),
+        ("si:chutney_tomato", ("2 tbsp", 40.0)),
+        ("si:chutney_coriander", ("2 tbsp", 35.0)),
+        ("si:chutney_mint", ("2 tbsp", 35.0)),
+    ]:
+        recipe = next(r for r in RECIPES if r.code == code)
+        assert recipe.measures[0] == expected, code
+
+
+def test_the_default_measure_is_written_as_the_only_default(db, rice_and_dal):
+    """Ordering only matters if the loader honours it. Pin that too."""
+    recipe = Recipe(
+        code="si:test_chutney",
+        name="Test chutney",
+        slot_tags="lunch",
+        diet_tags="vegetarian",
+        yield_factor=1.0,
+        serves=2,
+        measures=[("2 tbsp", 40.0), ("1 serving", 80.0)],
+        ingredients=[("ifct:A015", 80.0)],
+    )
+
+    load_recipes(db, [recipe])
+
+    dish = db.query(Dish).filter_by(code="si:test_chutney").one()
+    defaults = db.query(PortionMeasure).filter_by(dish_id=dish.id, is_default=True).all()
+    assert [(m.measure_name, m.grams) for m in defaults] == [("2 tbsp", 40.0)]
+
+
+def test_the_two_pongals_agree_about_ghee(db):
+    """They are the same dish class eaten at the same meal; a 50% difference in
+    ghee per serving between them is an inconsistency, not a recipe."""
+    per_serving = {}
+    for code in ("si:ven_pongal", "si:sakkarai_pongal"):
+        recipe = next(r for r in RECIPES if r.code == code)
+        ghee = sum(grams for c, grams in recipe.ingredients if c == "ifct:T013")
+        per_serving[code] = ghee / recipe.serves
+
+    assert per_serving["si:ven_pongal"] == pytest.approx(6.0)
+    assert per_serving["si:sakkarai_pongal"] == pytest.approx(7.5)
+
+
 def test_loading_the_whole_seed_set(db):
     seed_nutrients(db)
     from etl.common import cached_download

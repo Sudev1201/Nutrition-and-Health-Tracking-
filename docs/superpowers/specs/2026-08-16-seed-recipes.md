@@ -29,6 +29,20 @@ dosa is 1.70, not sub-1.0); composite condiments stay inlined rather than nestin
 and the proxy substitutions (rice flour, besan, roasted gram, urad flour, coconut milk)
 are accepted with their notes kept.
 
+## Fix round 1 — defects found reviewing the coded result
+
+| # | Defect | Fix |
+|---|---|---|
+| 1 | **CRITICAL: every oil and ghee had 0 kcal.** All 14 rows of IFCT's "Edible Oils and Fats" group publish `enerc=0` alongside `fatce=100`. Taken literally that zeroes the calories of the most energy-dense thing in the pantry, and because nearly all South Indian cooking is oil-tempered it understated 40+ dishes by 30–112%. | Fixed in the **ingredient layer**, not here — the recipe grams were right. `etl/load_ifct.py` now derives energy from the food's own macros with Atwater factors (4/4/9 kcal per g) whenever IFCT publishes a zero its own macro row contradicts, tagged `derived:atwater` so the substitution is visible. A guard test asserts no food in the real 542-row dataset can have zero energy while its macros imply more than 20 kcal/100 g. |
+| 2 | **Chutney default portion was double the reviewed one.** `load_recipes` marks `measures[0]` as the default, and the code listed the 70–80 g "1 serving" first, so the app pre-selected roughly double what this document bolds. | The 40 g / 35 g "2 tbsp" measure is now first for all four ground chutneys, and `serves` follows it. Two tests pin it: one on the recipe data, one proving the loader honours the order. |
+| 3 | **The two pongals disagreed about ghee.** Ven pongal was cut to 6 g of ghee per serving while sakkarai pongal kept 10 g. | Sakkarai pongal's ghee 60 g → **45 g** (7.5 g per serving). Yield 1.75 → 1.77. A test asserts the two stay levelled. |
+| 4 | **Seven dishes were 25–50% saltier than home practice**, all from one mechanical cause: salt set per raw batch without rechecking concentration after a sub-1.0 yield factor concentrates it. The tell was an inversion — a 110 g vegetable side out-salting a full cup of sambar. | Omelette 2 → 0.8 g, the three poriyals and thoran 5 → 3 g, rava dosa 8 → 5.5 g, adai 10 → 7.5 g, onion chutney 5 → 3 g, plus **fish fry 6 → 4.5 g and murukku 8 → 7 g**, which the new invariant caught and the review had not listed. An invariant test now caps salt at **1.2% of finished weight** for every non-powder dish. |
+
+**The salt grams were NOT cut across the board, deliberately.** Sambar's 10 g in a 1.5 L
+pot is 0.66% NaCl, at or below normal palatability; idli works out to 0.34 g of salt per
+idli, which matches published recipes; a modelled day totals ~9.9 g, squarely inside
+measured Indian intake of 8–11 g/day. Only the outliers moved.
+
 **Five manual ingredients now exist** in `backend/etl/load_manual_ingredients.py`:
 `manual:salt`, `usda:curd`, `manual:sugar`, `usda:coffee_brewed`, `usda:tea_brewed`.
 `manual:buttermilk` was deliberately NOT created — neer mor is curd plus dilution
@@ -161,7 +175,7 @@ nor loses much weight, cancelling the batter's gain.
 | Turmeric powder | `ifct:G033` | 2 |
 
 ### Rava dosa — `si:dosa_rava`
-Slots: breakfast, evening snack, dinner · Vegetarian · Serves 4 · Yield **0.95** · Raw 505 g → 480 g
+Slots: breakfast, evening snack, dinner · Vegetarian · Serves 4 · Yield **0.95** · Raw 502 g → 477 g
 Measures: **2 rava dosa = 120 g** · 1 rava dosa = 60 g
 Basis: standard 3:2:1 rava : rice flour : maida. Batter is poured, not spread, and cooked
 lace-thin and crisp — it ends up *lighter* than its dry ingredients plus oil, hence sub-1.0.
@@ -176,14 +190,14 @@ Rice flour is entered as raw milled rice (see resolutions A).
 | Wheat flour, refined | `ifct:A018` | 50 |
 | Chillies, green-1 | `ifct:G001` | 10 |
 | Ginger, fresh | `ifct:G014` | 8 |
-| Salt | `manual:salt` | 8 |
+| Salt | `manual:salt` | 5.5 |
 | Coriander leaves | `ifct:G009` | 8 |
 | Cumin seeds | `ifct:G025` | 4 |
 | Curry leaves | `ifct:G010` | 4 |
 | Pepper, black | `ifct:G031` | 3 |
 
 ### Adai — `si:adai`
-Slots: breakfast, evening snack, dinner · Vegetarian · Serves 8 · Yield **1.25** · Raw 608 g → 760 g
+Slots: breakfast, evening snack, dinner · Vegetarian · Serves 8 · Yield **1.25** · Raw 606 g → 757 g
 Measures: **1 adai = 95 g**
 Basis: 1 cup rice to 1 cup mixed dals, the usual Tamil proportion. Coarse-ground, thick,
 griddled — absorbs less than idli, more than a thin dosa.
@@ -199,7 +213,7 @@ griddled — absorbs less than idli, more than a thin dosa.
 | Coconut, kernel, fresh | `ifct:H007` | 40 |
 | Gingelly oil | `ifct:T004` | 40 |
 | Chillies, red | `ifct:G022` | 12 |
-| Salt | `manual:salt` | 10 |
+| Salt | `manual:salt` | 7.5 |
 | Curry leaves | `ifct:G010` | 5 |
 | Asafoetida | `ifct:G019` | 1 |
 
@@ -244,15 +258,17 @@ the ordinary version.
 | Asafoetida | `ifct:G019` | 1 |
 
 ### Sakkarai pongal — `si:sakkarai_pongal`
-Slots: breakfast, mid-morning snack, evening snack · Vegetarian · Serves 6 · Yield **1.75** · Raw 622 g → 1089 g
+Slots: breakfast, mid-morning snack, evening snack · Vegetarian · Serves 6 · Yield **1.77** · Raw 607 g → 1074 g
 Measures: **1 cup = 180 g** · ½ cup = 90 g
 Basis: rice : moong dal 3:1. **Jaggery reduced 250 g → 150 g (decision 2)** — 250 g had
 the jaggery exceeding the combined grain weight, a festival prasadam ratio; 150 g is the
 home version and takes about 65 kcal per serving off a dish people log as breakfast.
 Yield lower than ven pongal because jaggery, ghee and milk are already-heavy ingredients
 that do not swell.
-Ghee stays at 60 g. Flagged rather than silently changed: this is a sweet, and halving
-the jaggery has already taken the richness down a long way.
+**Ghee reduced 60 g → 45 g**, so both pongals sit at the same everyday standard —
+7.5 g of ghee per serving here, 6 g in ven pongal. The first pass flagged this rather than
+changing it silently, because the original ruling named only the jaggery; the follow-up
+ruling levelled the two.
 
 | Ingredient | Code | Raw g |
 |---|---|---:|
@@ -260,7 +276,7 @@ the jaggery has already taken the richness down a long way.
 | Rice, raw, milled | `ifct:A015` | 200 |
 | Milk, whole, Cow | `ifct:L002` | 100 |
 | Green gram, dal | `ifct:B010` | 60 |
-| Ghee | `ifct:T013` | 60 |
+| Ghee | `ifct:T013` | 45 |
 | Cashew nut | `ifct:H005` | 30 |
 | Raisins, dried, black | `ifct:E057` | 20 |
 | Cardamom, green | `ifct:G020` | 2 |
@@ -648,7 +664,7 @@ All the dry sautés sit **below 1.0** — this is where water genuinely leaves t
 Cabbage loses the most (0.75), carrot the least (0.88).
 
 ### Beans poriyal — `si:poriyal_beans`
-Slots: lunch, dinner · Vegetarian · Serves 4 · Yield **0.85** · Raw 508 g → 432 g
+Slots: lunch, dinner · Vegetarian · Serves 4 · Yield **0.85** · Raw 506 g → 430 g
 Measures: **1 serving = 110 g** · 1 cup = 130 g
 
 | Ingredient | Code | Raw g |
@@ -659,14 +675,14 @@ Measures: **1 serving = 110 g** · 1 cup = 130 g
 | Bengal gram, dal | `ifct:B001` | 8 |
 | Black gram, dal | `ifct:B003` | 8 |
 | Chillies, green-1 | `ifct:G001` | 6 |
-| Salt | `manual:salt` | 5 |
+| Salt | `manual:salt` | 3 |
 | Mustard seeds | `ifct:H013` | 4 |
 | Chillies, red | `ifct:G022` | 4 |
 | Curry leaves | `ifct:G010` | 4 |
 | Asafoetida | `ifct:G019` | 1 |
 
 ### Cabbage poriyal — `si:poriyal_cabbage`
-Slots: lunch, dinner · Vegetarian · Serves 4 · Yield **0.75** · Raw 554 g → 416 g
+Slots: lunch, dinner · Vegetarian · Serves 4 · Yield **0.75** · Raw 552 g → 414 g
 Measures: **1 serving = 105 g**
 Basis: lowest yield of the poriyals — cabbage is ~92% water and collapses.
 
@@ -678,13 +694,13 @@ Basis: lowest yield of the poriyals — cabbage is ~92% water and collapses.
 | Bengal gram, dal | `ifct:B001` | 8 |
 | Black gram, dal | `ifct:B003` | 8 |
 | Chillies, green-1 | `ifct:G001` | 8 |
-| Salt | `manual:salt` | 5 |
+| Salt | `manual:salt` | 3 |
 | Mustard seeds | `ifct:H013` | 4 |
 | Curry leaves | `ifct:G010` | 4 |
 | Asafoetida | `ifct:G019` | 1 |
 
 ### Carrot poriyal — `si:poriyal_carrot`
-Slots: lunch, dinner · Vegetarian · Serves 4 · Yield **0.88** · Raw 501 g → 441 g
+Slots: lunch, dinner · Vegetarian · Serves 4 · Yield **0.88** · Raw 499 g → 439 g
 Measures: **1 serving = 110 g**
 
 | Ingredient | Code | Raw g |
@@ -695,7 +711,7 @@ Measures: **1 serving = 110 g**
 | Bengal gram, dal | `ifct:B001` | 8 |
 | Black gram, dal | `ifct:B003` | 8 |
 | Chillies, green-1 | `ifct:G001` | 6 |
-| Salt | `manual:salt` | 5 |
+| Salt | `manual:salt` | 3 |
 | Mustard seeds | `ifct:H013` | 4 |
 | Curry leaves | `ifct:G010` | 4 |
 
@@ -747,7 +763,7 @@ version uses tamarind or raw mango instead — flagged.
 | Turmeric powder | `ifct:G033` | 2 |
 
 ### Cabbage thoran — `si:thoran`
-Slots: lunch, dinner · Vegetarian · Serves 4 · Yield **0.80** · Raw 573 g → 458 g
+Slots: lunch, dinner · Vegetarian · Serves 4 · Yield **0.80** · Raw 571 g → 457 g
 Measures: **1 serving = 115 g**
 Basis: **Kerala** dish, included as the brief asked. Differs from cabbage poriyal by
 using more coconut, crushed garlic and cumin, and no dal tempering.
@@ -760,7 +776,7 @@ using more coconut, crushed garlic and cumin, and no dal tempering.
 | Coconut oil | `ifct:T001` | 18 |
 | Chillies, green-1 | `ifct:G001` | 10 |
 | Garlic, small cloves | `ifct:G012` | 6 |
-| Salt | `manual:salt` | 5 |
+| Salt | `manual:salt` | 3 |
 | Curry leaves | `ifct:G010` | 5 |
 | Mustard seeds | `ifct:H013` | 4 |
 | Cumin seeds | `ifct:G025` | 3 |
@@ -895,10 +911,10 @@ identical apart from the fish row.
 | Asafoetida | `ifct:G019` | 1 |
 
 ### Fish fry — `si:fish_fry_vanjaram` · `_sardine` · `_mackerel` · `_nethili`
-Slots: lunch, dinner · **Fishetarian** · Serves 4 · Yield **0.80** · Raw 495 g → 396 g
+Slots: lunch, dinner · **Fishetarian** · Serves 4 · Yield **0.80** · Raw 494 g → 395 g
 Measures: **1 piece = 100 g**
 Basis: masala-coated and shallow fried. Sub-1.0 because frying drives off water faster
-than the fish takes up oil. **Deep-fry oil retention: 40 g of the 396 g finished weight
+than the fish takes up oil. **Deep-fry oil retention: 40 g of the 395 g finished weight
 is absorbed oil, i.e. 10%** — the lowest in the set, because the masala coat is thin and
 the fish sheds water fast. Four dishes, identical apart from the fish row.
 
@@ -910,7 +926,7 @@ the fish sheds water fast. Four dishes, identical apart from the fish row.
 | Garlic, big cloves | `ifct:G011` | 10 |
 | Chillies, red | `ifct:G022` | 8 |
 | Ginger, fresh | `ifct:G014` | 8 |
-| Salt | `manual:salt` | 6 |
+| Salt | `manual:salt` | 4.5 |
 | Turmeric powder | `ifct:G033` | 3 |
 
 ### Chicken curry — `si:chicken_curry`
@@ -963,8 +979,8 @@ Basis: 4 eggs (200 g edible portion) boiled and simmered in an onion-tomato-coco
 | Turmeric powder | `ifct:G033` | 2 |
 
 ### Omelette — `si:omelette`
-Slots: breakfast, evening snack, dinner · **Eggetarian** · Serves 1 · Yield **0.85** · Raw 150 g → 128 g
-Measures: **1 omelette (2 eggs) = 128 g**
+Slots: breakfast, evening snack, dinner · **Eggetarian** · Serves 1 · Yield **0.85** · Raw 149 g → 126 g
+Measures: **1 omelette (2 eggs) = 126 g**
 Basis: built from raw egg plus oil rather than IFCT's ready-made `M007 Egg, poultry, omlet`,
 so the oil is explicit and adjustable. Sub-1.0 because egg loses water in the pan.
 
@@ -975,7 +991,7 @@ so the oil is explicit and adjustable. Sub-1.0 because egg loses water in the pa
 | Sunflower oil | `ifct:T012` | 8 |
 | Chillies, green-1 | `ifct:G001` | 5 |
 | Coriander leaves | `ifct:G009` | 4 |
-| Salt | `manual:salt` | 2 |
+| Salt | `manual:salt` | 0.8 |
 | Pepper, black | `ifct:G031` | 1 |
 
 ### Boiled egg — `si:egg_boiled`
@@ -992,7 +1008,7 @@ Basis: edible portion only, shell excluded. Boiling changes weight negligibly.
 # 6. Chutneys and podis
 
 ### Coconut chutney — `si:chutney_coconut`
-Slots: breakfast, evening snack, dinner · Vegetarian · Serves 6 · Yield **1.80** · Raw 275 g → 495 g
+Slots: breakfast, evening snack, dinner · Vegetarian · Serves 12 (2-tbsp portions) · Yield **1.80** · Raw 275 g → 495 g
 Measures: **2 tbsp = 40 g** · 1 serving = 80 g
 Basis: about half a coconut, ground with water to a spoonable consistency — the water is
 why yield is 1.80. Roasted gram (pottukadalai) is not in IFCT; Bengal gram dal used instead.
@@ -1011,7 +1027,7 @@ why yield is 1.80. Roasted gram (pottukadalai) is not in IFCT; Bengal gram dal u
 | Curry leaves | `ifct:G010` | 3 |
 
 ### Tomato chutney — `si:chutney_tomato`
-Slots: breakfast, evening snack, dinner · Vegetarian · Serves 6 · Yield **0.82** · Raw 527 g → 432 g
+Slots: breakfast, evening snack, dinner · Vegetarian · Serves 11 (2-tbsp portions) · Yield **0.82** · Raw 527 g → 432 g
 Measures: **2 tbsp = 40 g** · 1 serving = 70 g
 Basis: tomatoes sautéed down before grinding — no water added, so it reduces below 1.0.
 
@@ -1030,7 +1046,7 @@ Basis: tomatoes sautéed down before grinding — no water added, so it reduces 
 | Asafoetida | `ifct:G019` | 1 |
 
 ### Coriander chutney — `si:chutney_coriander`
-Slots: breakfast, evening snack, dinner · Vegetarian · Serves 6 · Yield **1.55** · Raw 273 g → 423 g
+Slots: breakfast, evening snack, dinner · Vegetarian · Serves 12 (2-tbsp portions) · Yield **1.55** · Raw 273 g → 423 g
 Measures: **2 tbsp = 35 g** · 1 serving = 70 g
 Basis: two large bunches of coriander (120 g leaves, stalks discarded).
 
@@ -1048,7 +1064,7 @@ Basis: two large bunches of coriander (120 g leaves, stalks discarded).
 | Asafoetida | `ifct:G019` | 1 |
 
 ### Mint chutney — `si:chutney_mint`
-Slots: breakfast, evening snack, dinner · Vegetarian · Serves 6 · Yield **1.45** · Raw 307 g → 445 g
+Slots: breakfast, evening snack, dinner · Vegetarian · Serves 13 (2-tbsp portions) · Yield **1.45** · Raw 307 g → 445 g
 Measures: **2 tbsp = 35 g** · 1 serving = 75 g
 
 | Ingredient | Code | Raw g |
@@ -1065,7 +1081,7 @@ Measures: **2 tbsp = 35 g** · 1 serving = 75 g
 | Mustard seeds | `ifct:H013` | 3 |
 
 ### Onion chutney (vengaya chutney) — `si:chutney_onion`
-Slots: breakfast, evening snack, dinner · Vegetarian · Serves 6 · Yield **0.84** · Raw 311 g → 261 g
+Slots: breakfast, evening snack, dinner · Vegetarian · Serves 6 · Yield **0.84** · Raw 309 g → 260 g
 Measures: **2 tbsp = 40 g**
 Basis: shallots sautéed till soft, ground thick. Reduces like tomato chutney.
 
@@ -1076,7 +1092,7 @@ Basis: shallots sautéed till soft, ground thick. Reduces like tomato chutney.
 | Black gram, dal | `ifct:B003` | 12 |
 | Tamarind, pulp | `ifct:E064` | 10 |
 | Chillies, red | `ifct:G022` | 8 |
-| Salt | `manual:salt` | 5 |
+| Salt | `manual:salt` | 3 |
 | Asafoetida | `ifct:G019` | 1 |
 
 ### Sambar powder — `si:sambar_powder`
@@ -1218,7 +1234,7 @@ is omitted because IFCT has no entry for it — this understates sodium slightly
 | Asafoetida | `ifct:G019` | 1 |
 
 ### Murukku (thenkuzhal) — `si:murukku`
-Slots: evening snack · Vegetarian · Serves 24 (pieces) · Yield **0.95** · Raw 641 g → 609 g
+Slots: evening snack · Vegetarian · Serves 24 (pieces) · Yield **0.95** · Raw 640 g → 608 g
 Measures: **1 murukku = 25 g** · 2 murukku = 50 g
 Basis: 4:1 rice flour to urad flour, the thenkuzhal ratio. ~24 pieces. Sub-1.0 because the
 finished murukku is dry and crisp — nearly all the dough water is driven off. Oil 15% (90 g).
@@ -1230,7 +1246,7 @@ finished murukku is dry and crisp — nearly all the dough water is driven off. 
 | Groundnut oil *(absorbed)* | `ifct:T005` | 90 |
 | Ghee | `ifct:T013` | 25 |
 | Gingelly seeds, white | `ifct:H011` | 10 |
-| Salt | `manual:salt` | 8 |
+| Salt | `manual:salt` | 7 |
 | Cumin seeds | `ifct:G025` | 6 |
 | Asafoetida | `ifct:G019` | 2 |
 
@@ -1497,3 +1513,14 @@ Proxies 8–11 and 16 were reviewed and **accepted**, with their notes kept in t
   fat and protein are unaffected.
 * **`usda:curd` iodine and `manual:sugar` iodine/biotin are NULL, not zero.** Unknown
   reads as unknown, deliberately.
+* **Sodium overall.** Reviewed in fix round 1 and concluded broadly right: a modelled day
+  totals ~9.9 g of salt, matching measured Indian intake of 8–11 g/day, and sambar at
+  0.66% NaCl sits at or below normal palatability. Seven outliers were trimmed and a
+  1.2%-of-finished-weight invariant now guards the whole set. What is still worth watching
+  is that this is *modelled* salt — what the recipe says, not what the cook's hand does. If
+  the hypertension rules fire more often than feels right, the per-dish salt grams are the
+  thing to re-examine, not the salt composition, which is USDA-sourced and solid.
+* **Oil and ghee energy is derived, not published.** IFCT publishes no usable energy figure
+  for any fat, so all 14 carry an Atwater-derived ~900 kcal/100 g tagged `derived:atwater`.
+  The number itself is not controversial — 100 g of fat is 900 kcal by definition — but it
+  is the one place where a headline calorie figure here does not trace to a measured row.

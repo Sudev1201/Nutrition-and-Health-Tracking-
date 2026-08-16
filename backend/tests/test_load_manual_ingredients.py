@@ -27,7 +27,7 @@ def seeded(db):
 def test_salt_sodium_is_the_real_thing(seeded):
     """The single most load-bearing number in the recipe set.
 
-    40 of the 66 authored dishes contain salt, and sodium drives the whole
+    57 of the 72 authored dishes contain salt, and sodium drives the whole
     hypertension rule set. USDA fdc 746775 "Salt, table, iodized" says 38,700
     mg/100 g, which is 98.4% of pure NaCl's 39,337 mg -- the balance being the
     water, anticaking agent and iodate a real retail salt contains.

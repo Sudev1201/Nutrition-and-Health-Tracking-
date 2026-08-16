@@ -1,8 +1,9 @@
 """The five ingredients no IFCT row can supply, without which the recipe set is unusable.
 
-Forty of the sixty-six authored South Indian dishes contain salt and nothing
-else from this file; until salt exists, every sodium number the app produces is
-wrong, and sodium is the nutrient the whole hypertension rule set acts on. The
+Fifty-seven of the seventy-two authored South Indian dishes contain salt and
+nothing else from this file; until salt exists, every sodium number the app
+produces is wrong, and sodium is the nutrient the whole hypertension rule set
+acts on. The
 other four (curd, sugar, brewed coffee, brewed tea) are each used by between one
 and five dishes and are equally unavailable from IFCT -- IFCT's Sugars group
 holds only jaggery and cane juice, its Milk group only buffalo milk, cow milk,

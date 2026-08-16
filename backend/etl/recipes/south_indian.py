@@ -51,6 +51,17 @@ Decisions baked into this data
   Published figures for Indian fried snacks range from 8% to 25%, so this is the
   document's largest single error source; keeping the percentage visible is what
   makes it revisable.
+* SALT IS CAPPED AT 1.2% OF FINISHED WEIGHT, not of the raw batch. The two are
+  not the same thing, and that is the whole point: a sub-1.0 yield factor
+  concentrates the salt, so a 5 g pinch in a 554 g raw cabbage poriyal is 1.2%
+  of what actually reaches the plate while the same 5 g in sambar is 0.3%. Seven
+  dishes were set on the raw basis and came out 25-50% saltier than home
+  practice; test_no_dish_is_saltier_than_home_cooking now makes that impossible.
+  The rest of the salt weights were checked and deliberately left alone -- a
+  modelled day totals ~9.9 g, which is measured Indian intake.
+* MEASURE ORDER IS LOAD-BEARING. load_recipes marks measures[0] as is_default,
+  so the first entry is what the app pre-selects and therefore what most taps
+  log. Order most-likely-tap first, not largest first.
 
 Proxy substitutions, where IFCT has no row for the exact form used
 -----------------------------------------------------------------
@@ -82,8 +93,8 @@ VEG = "vegetarian"
 
 # The one batter, shared by idli, dosa, masala dosa and uttapam: 4:1 parboiled
 # rice to urad dal by volume = 400 g : 95 g by weight, plus a little fenugreek
-# for the ferment. Scaled proportionally where a dish uses part of a batch.
-BATTER_RICE_TO_DAL = 400 / 95
+# for the ferment. Scaled proportionally where a dish uses part of a batch, and
+# pinned by test_the_batter_dishes_use_the_four_to_one_ratio.
 
 
 # ---------------------------------------------------------------------------
@@ -170,7 +181,10 @@ _TIFFIN: list[Recipe] = [
             ("ifct:A018", 50.0),  # Refined wheat flour (maida)
             ("ifct:G001", 10.0),
             ("ifct:G014", 8.0),
-            ("manual:salt", 8.0),
+            # 8 g was 1.67% of the finished weight. 5.5 g is 1.15%, and it is
+            # also what matches plain dosa's 0.69 g of salt per dosa -- the two
+            # batters should not disagree about how salty a dosa is.
+            ("manual:salt", 5.5),
             ("ifct:G009", 8.0),
             ("ifct:G025", 4.0),  # Cumin
             ("ifct:G010", 4.0),
@@ -197,7 +211,7 @@ _TIFFIN: list[Recipe] = [
             ("ifct:H007", 40.0),  # Fresh coconut
             ("ifct:T004", 40.0),
             ("ifct:G022", 12.0),  # Red chilli
-            ("manual:salt", 10.0),
+            ("manual:salt", 7.5),  # 10 g was 1.32% of the finished weight
             ("ifct:G010", 5.0),
             ("ifct:G019", 1.0),  # Asafoetida
         ],
@@ -259,10 +273,11 @@ _TIFFIN: list[Recipe] = [
         # slightly exceeding the combined grain weight -- a festival prasadam
         # ratio. 150 g is the home version and takes ~65 kcal per serving off a
         # dish people log as breakfast.
-        # Ghee stays at 60 g: this is a sweet, and halving the jaggery has
-        # already taken the richness down a long way. Flagged rather than
-        # silently changed.
-        yield_factor=1.75,
+        # GHEE: 45 g, brought down from 60 g so both pongals sit at the same
+        # everyday standard (7.5 g per serving here, 6 g in ven pongal). This
+        # was flagged rather than silently changed on the first pass, and the
+        # ruling came back to level them.
+        yield_factor=1.77,
         serves=6,
         measures=[("1 cup", 180.0), ("1/2 cup", 90.0)],
         ingredients=[
@@ -270,7 +285,7 @@ _TIFFIN: list[Recipe] = [
             ("ifct:A015", 200.0),
             ("ifct:L002", 100.0),  # Cow milk
             ("ifct:B010", 60.0),
-            ("ifct:T013", 60.0),
+            ("ifct:T013", 45.0),
             ("ifct:H005", 30.0),
             ("ifct:E057", 20.0),  # Raisins
             ("ifct:G020", 2.0),  # Cardamom
@@ -737,7 +752,9 @@ _VEGETABLES: list[Recipe] = [
             ("ifct:B001", 8.0),
             ("ifct:B003", 8.0),
             ("ifct:G001", 6.0),
-            ("manual:salt", 5.0),
+            # 3 g, not 5: a sub-1.0 yield CONCENTRATES the salt, and 5 g in a
+            # 432 g finished side out-salted a full cup of sambar per gram.
+            ("manual:salt", 3.0),
             ("ifct:H013", 4.0),
             ("ifct:G022", 4.0),
             ("ifct:G010", 4.0),
@@ -759,7 +776,7 @@ _VEGETABLES: list[Recipe] = [
             ("ifct:B001", 8.0),
             ("ifct:B003", 8.0),
             ("ifct:G001", 8.0),
-            ("manual:salt", 5.0),
+            ("manual:salt", 3.0),  # see beans poriyal
             ("ifct:H013", 4.0),
             ("ifct:G010", 4.0),
             ("ifct:G019", 1.0),
@@ -780,7 +797,7 @@ _VEGETABLES: list[Recipe] = [
             ("ifct:B001", 8.0),
             ("ifct:B003", 8.0),
             ("ifct:G001", 6.0),
-            ("manual:salt", 5.0),
+            ("manual:salt", 3.0),  # see beans poriyal
             ("ifct:H013", 4.0),
             ("ifct:G010", 4.0),
         ],
@@ -855,7 +872,7 @@ _VEGETABLES: list[Recipe] = [
             ("ifct:T001", 18.0),
             ("ifct:G001", 10.0),
             ("ifct:G012", 6.0),  # Garlic, small cloves
-            ("manual:salt", 5.0),
+            ("manual:salt", 3.0),  # see beans poriyal
             ("ifct:G010", 5.0),
             ("ifct:H013", 4.0),
             ("ifct:G025", 3.0),
@@ -1011,7 +1028,7 @@ _FISH_KUZHAMBU_BASE: list[tuple[str, float]] = [
 ]
 
 _FISH_FRY_BASE: list[tuple[str, float]] = [
-    # DEEP-FRY OIL RETENTION: 40 g of the 396 g finished weight is absorbed
+    # DEEP-FRY OIL RETENTION: 40 g of the 395 g finished weight is absorbed
     # groundnut oil, i.e. 10%. Shallow-fried fish is the lowest retention in the
     # set because the masala coat is thin and the fish sheds water fast.
     # Published figures for Indian frying run 8-25%; revise here if measured.
@@ -1020,7 +1037,10 @@ _FISH_FRY_BASE: list[tuple[str, float]] = [
     ("ifct:G011", 10.0),
     ("ifct:G022", 8.0),
     ("ifct:G014", 8.0),
-    ("manual:salt", 6.0),
+    # 4.5 g, not 6: the 0.80 yield concentrates it, and 6 g landed at 1.52% of
+    # the finished weight -- 590 mg of sodium in one piece. Home marinade is
+    # about a teaspoon per 500 g of fish.
+    ("manual:salt", 4.5),
     ("ifct:G033", 3.0),
 ]
 
@@ -1118,14 +1138,17 @@ _OTHER_NONVEG: list[Recipe] = [
         # so the oil is explicit and adjustable. Sub-1.0: egg loses water.
         yield_factor=0.85,
         serves=1,
-        measures=[("1 omelette (2 eggs)", 128.0)],
+        measures=[("1 omelette (2 eggs)", 126.0)],
         ingredients=[
             ("ifct:M001", 100.0),
             ("ifct:G017", 30.0),
             ("ifct:T012", 8.0),
             ("ifct:G001", 5.0),
             ("ifct:G009", 4.0),
-            ("manual:salt", 2.0),
+            # 2 g put 904 mg of sodium in a single 2-egg omelette -- 45% of the
+            # daily cap -- because a 150 g raw batch shrinks to 126 g in the
+            # pan. 0.8 g is 0.63% of the FINISHED weight, a normal seasoning.
+            ("manual:salt", 0.8),
             ("ifct:G031", 1.0),
         ],
     ),
@@ -1144,6 +1167,12 @@ _OTHER_NONVEG: list[Recipe] = [
 
 # ---------------------------------------------------------------------------
 # 6. Chutneys and podis
+#
+# MEASURE ORDER MATTERS HERE. load_recipes marks measures[0] as is_default, so
+# the first entry is what the app pre-selects. The reviewed document bolds
+# "2 tbsp" as the default for all four ground chutneys, and it has to stay
+# first: leading with the 70-80 g "1 serving" doubled the sodium and fat logged
+# on every chutney tap.
 # ---------------------------------------------------------------------------
 _CHUTNEYS: list[Recipe] = [
     Recipe(
@@ -1154,8 +1183,8 @@ _CHUTNEYS: list[Recipe] = [
         # About half a coconut, ground with water to a spoonable consistency --
         # the water is why yield is 1.80.
         yield_factor=1.80,
-        serves=6,
-        measures=[("1 serving", 80.0), ("2 tbsp", 40.0)],
+        serves=12,
+        measures=[("2 tbsp", 40.0), ("1 serving", 80.0)],
         ingredients=[
             ("ifct:H007", 200.0),
             ("ifct:B001", 30.0),  # proxy for roasted gram (pottukadalai)
@@ -1175,8 +1204,8 @@ _CHUTNEYS: list[Recipe] = [
         slot_tags="breakfast snack dinner",
         diet_tags=VEG,
         yield_factor=0.82,  # sauteed down before grinding, no water added
-        serves=6,
-        measures=[("1 serving", 70.0), ("2 tbsp", 40.0)],
+        serves=11,
+        measures=[("2 tbsp", 40.0), ("1 serving", 70.0)],
         ingredients=[
             ("ifct:D075", 350.0),
             ("ifct:G017", 100.0),
@@ -1197,8 +1226,8 @@ _CHUTNEYS: list[Recipe] = [
         slot_tags="breakfast snack dinner",
         diet_tags=VEG,
         yield_factor=1.55,
-        serves=6,
-        measures=[("1 serving", 70.0), ("2 tbsp", 35.0)],
+        serves=12,
+        measures=[("2 tbsp", 35.0), ("1 serving", 70.0)],
         ingredients=[
             ("ifct:G009", 120.0),  # two large bunches, stalks discarded
             ("ifct:H007", 80.0),
@@ -1218,8 +1247,8 @@ _CHUTNEYS: list[Recipe] = [
         slot_tags="breakfast snack dinner",
         diet_tags=VEG,
         yield_factor=1.45,
-        serves=6,
-        measures=[("1 serving", 75.0), ("2 tbsp", 35.0)],
+        serves=13,
+        measures=[("2 tbsp", 35.0), ("1 serving", 75.0)],
         ingredients=[
             ("ifct:G016", 100.0),
             ("ifct:H007", 80.0),
@@ -1247,7 +1276,9 @@ _CHUTNEYS: list[Recipe] = [
             ("ifct:B003", 12.0),
             ("ifct:E064", 10.0),
             ("ifct:G022", 8.0),
-            ("manual:salt", 5.0),
+            # 1.91% of finished weight was the worst in the set -- shallots
+            # cook down hard, so the salt concentrates twice over.
+            ("manual:salt", 3.0),
             ("ifct:G019", 1.0),
         ],
     ),
@@ -1442,7 +1473,7 @@ _FRIED: list[Recipe] = [
             ("ifct:T005", 90.0),  # absorbed
             ("ifct:T013", 25.0),
             ("ifct:H011", 10.0),
-            ("manual:salt", 8.0),
+            ("manual:salt", 7.0),  # 8 g was 1.31% of the finished weight
             ("ifct:G025", 6.0),
             ("ifct:G019", 2.0),
         ],
