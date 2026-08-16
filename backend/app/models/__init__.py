@@ -8,6 +8,7 @@ otherwise `create_all`/`drop_all` and autogenerate silently miss tables.
 
 from app.models.base import Base
 from app.models.household import Household, HouseholdInvite, HouseholdMember
+from app.models.nutrient import Nutrient
 from app.models.user import User
 
 __all__ = [
@@ -15,5 +16,6 @@ __all__ = [
     "Household",
     "HouseholdInvite",
     "HouseholdMember",
+    "Nutrient",
     "User",
 ]
