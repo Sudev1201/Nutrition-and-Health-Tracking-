@@ -1,5 +1,6 @@
 import csv
 from pathlib import Path
+from typing import NamedTuple
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -46,9 +47,22 @@ PLANT_B12_ZERO_GROUPS = frozenset(
 )
 PLANT_B12_ZERO_SOURCE = "derived:plant-b12-zero"
 
-# Curated ifct-code -> USDA fdc_id pairings, picked and verified by hand
-# against the real
-# etl/.cache/usda_foundation_food/FoodData_Central_foundation_food_csv_2025-04-24/
+
+class CuratedPairing(NamedTuple):
+    """One IFCT ingredient's pairing to a specific USDA food, and which of
+    USDA_NUTRIENT_MAP's nutrients that pairing is trusted to supply.
+
+    A single fdc_id is NOT assumed to supply both B12 and iodine -- see the
+    intrinsic-vs-exogenous rule below CURATED_ANIMAL_MAP. `nutrients` lets
+    each ingredient opt in per nutrient independently.
+    """
+
+    fdc_id: str
+    nutrients: frozenset[str]
+
+
+# Curated ifct-code -> USDA pairings, picked and verified by hand against the
+# real etl/.cache/usda_foundation_food/FoodData_Central_foundation_food_csv_2025-04-24/
 # food.csv, not matched by algorithm. This replaces a prior version of this
 # loader that fuzzy-matched IFCT names against USDA descriptions by first
 # comma-separated word; against the real data that matched ~5% of
@@ -59,6 +73,24 @@ PLANT_B12_ZERO_SOURCE = "derived:plant-b12-zero"
 # map is deliberately small and every entry is auditable below. Everything
 # in an animal food group that isn't listed here stays NULL.
 #
+# THE INTRINSIC-VS-EXOGENOUS RULE for which nutrients a pairing may supply:
+# B12 is synthesised by the animal (rumen bacteria in cattle) or is a fixed
+# biological consequence of what the species is, so a USDA sample's B12
+# value is a property of the food and transfers across countries reasonably
+# well. Iodine is frequently NOT like this -- it can be a residue of a
+# specific country's production practice rather than the food itself:
+# - US dairy iodine is inflated by iodophor sanitisers used on milking
+#   equipment and teat dips, a US processing practice, not a property of
+#   milk. It does not transfer to Indian cow milk.
+# - Hen egg iodine tracks feed iodine-fortification programs, which are
+#   country- and producer-specific, for the same reason -- excluded here too.
+# - Seafood iodine is different in kind: fish and shellfish concentrate
+#   iodine from seawater/marine algae through their own physiology. The
+#   iodine is genuinely IN the animal, not a processing artifact, so marine
+#   and freshwater fish keep their iodine pairing.
+# The next person extending this map should apply the same test per nutrient,
+# not assume one fdc_id is good for everything USDA happens to report on it.
+#
 # Foods considered and rejected, for the record:
 # - ifct:L001 Milk, whole, Buffalo: NOT mapped. USDA's foundation-food set
 #   has no water-buffalo milk at all (the US dairy industry is essentially
@@ -67,7 +99,8 @@ PLANT_B12_ZERO_SOURCE = "derived:plant-b12-zero"
 #   whole milk (fdc 323444, a whey cheese from a different process), Cheese,
 #   dry white, queso seco (fdc 329830, aged and salted), and Cheese, queso
 #   fresco, solid (fdc 2647442, no B12 value recorded at all). None is a
-#   confident stand-in for unsalted, unaged, acid-set Indian paneer.
+#   confident stand-in for unsalted, unaged, acid-set Indian paneer. A poor
+#   analog is worse than no analog, so this stays a deliberate gap.
 # - ifct:P009 Cat fish (Marine Fish): NOT mapped. USDA's farmed catfish is
 #   the freshwater species (Ictaluridae); IFCT's marine "Cat fish" is a
 #   different, unrelated family (Ariidae) that only shares an English name.
@@ -75,16 +108,31 @@ PLANT_B12_ZERO_SOURCE = "derived:plant-b12-zero"
 # - ifct:P084 Tuna (Marine Fish): NOT mapped. The only USDA foundation-food
 #   tuna is "canned in water, drained solids" -- a different, processed
 #   preparation from IFCT's raw fish values, not a confident match.
-CURATED_ANIMAL_MAP: dict[str, str] = {
-    # Milk and Milk Products
-    "ifct:L002": "322892",  # Milk, whole, 3.25% milkfat, with added vitamin D
-    # Egg and Egg Products
-    "ifct:M001": "748967",  # Eggs, Grade A, Large, egg whole
-    # Marine Fish
-    "ifct:P068": "2684441",  # Fish, salmon, Atlantic, farm raised, raw
-    "ifct:P083": "2684442",  # Fish, tilapia, farm raised, raw
-    # Fresh Water Fish and Shellfish
-    "ifct:S001": "2684445",  # Fish, catfish, farm raised, raw
+CURATED_ANIMAL_MAP: dict[str, CuratedPairing] = {
+    # Milk and Milk Products. B12 only -- see the intrinsic-vs-exogenous
+    # rule above: USDA's 37.9 ug/100g iodine reflects US teat-dip/sanitiser
+    # residue, not milk composition.
+    "ifct:L002": CuratedPairing(
+        "322892", frozenset({"vitamin_b12"})
+    ),  # Milk, whole, 3.25% milkfat, with added vitamin D
+    # Egg and Egg Products. B12 only -- hen egg iodine tracks feed
+    # iodine-fortification programs (country/producer specific), the same
+    # exogenous-source concern as milk.
+    "ifct:M001": CuratedPairing(
+        "748967", frozenset({"vitamin_b12"})
+    ),  # Eggs, Grade A, Large, egg whole
+    # Marine Fish. Both nutrients -- seafood iodine is concentrated by the
+    # animal itself, not a processing artifact.
+    "ifct:P068": CuratedPairing(
+        "2684441", frozenset({"vitamin_b12", "iodine"})
+    ),  # Fish, salmon, Atlantic, farm raised, raw
+    "ifct:P083": CuratedPairing(
+        "2684442", frozenset({"vitamin_b12", "iodine"})
+    ),  # Fish, tilapia, farm raised, raw
+    # Fresh Water Fish and Shellfish. Both nutrients, same reasoning.
+    "ifct:S001": CuratedPairing(
+        "2684445", frozenset({"vitamin_b12", "iodine"})
+    ),  # Fish, catfish, farm raised, raw
 }
 
 
@@ -134,14 +182,17 @@ def _fill_curated_animal(
     nutrient_csv: Path,
     food_nutrient_csv: Path,
 ) -> int:
-    """Animal-source B12 and iodine come only from CURATED_ANIMAL_MAP.
+    """Animal-source B12 and iodine come only from CURATED_ANIMAL_MAP, and
+    only for the nutrients each pairing explicitly opts into (see the
+    intrinsic-vs-exogenous rule above the map -- a fdc_id having a USDA value
+    for a nutrient is not by itself enough to attach it).
 
     Iodine gets no zero-fill (plant iodine is soil-dependent, not reliably
-    zero) -- it is only ever attached here, for the same curated pairs, when
-    USDA actually records a value for that food.
+    zero) -- it is only ever attached here, for the pairings that opted in,
+    when USDA actually records a value for that food.
     """
-    wanted_fdc_ids = set(CURATED_ANIMAL_MAP.values())
-    fdc_to_ifct = {fdc: code for code, fdc in CURATED_ANIMAL_MAP.items()}
+    wanted_fdc_ids = {pairing.fdc_id for pairing in CURATED_ANIMAL_MAP.values()}
+    fdc_to_ifct = {pairing.fdc_id: code for code, pairing in CURATED_ANIMAL_MAP.items()}
 
     # A curated fdc_id has to actually exist in the supplied food.csv. This
     # guards against a stale mapping (e.g. a future USDA release renumbering
@@ -171,7 +222,11 @@ def _fill_curated_animal(
             if nutrient_code is None:
                 continue
 
-            ingredient = ingredients_by_code.get(fdc_to_ifct[fdc_id])
+            ifct_code = fdc_to_ifct[fdc_id]
+            if nutrient_code not in CURATED_ANIMAL_MAP[ifct_code].nutrients:
+                continue  # this pairing doesn't vouch for this nutrient
+
+            ingredient = ingredients_by_code.get(ifct_code)
             nutrient = nutrients.get(nutrient_code)
             if ingredient is None or nutrient is None:
                 continue
@@ -205,7 +260,8 @@ def load_usda_gapfill(
     - every ingredient in a pure-plant food group gets an explicit B12 of
       0.0 (PLANT_B12_ZERO_GROUPS / PLANT_B12_ZERO_SOURCE);
     - a small, hand-verified set of animal foods (CURATED_ANIMAL_MAP) gets
-      both B12 and iodine from a specific named USDA row.
+      B12 and/or iodine from a specific named USDA row, per-nutrient, per
+      the intrinsic-vs-exogenous rule documented above the map.
     Everything else stays NULL -- unknown must read as unknown. An existing
     IngredientNutrient row is never overwritten; IFCT is the authority for
     Indian foods where it has data.
