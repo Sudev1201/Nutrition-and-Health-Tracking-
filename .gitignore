@@ -5,6 +5,7 @@ __pycache__/
 .env.local
 .pytest_cache/
 .ruff_cache/
+backend/etl/.cache/
 node_modules/
 dist/
 .DS_Store
