@@ -101,25 +101,44 @@ A review of the seeded data (not of this loader's logic) found:
   vitamin_d all have a published EAR in Table 3/4, but every row for these
   five had been seeded with ear=None, leaving the adequacy floor undefined
   for exactly the nutrients the compensation engine most needs it for. Added
-  from the EAR-2020 column (see "CONFIRMED" above). Row placement: the
-  brief note's EAR is not stratified by activity level (one number per
-  nutrient per sex, unlike RDA which has a distinct figure per PAL band), so
-  the same published EAR is attached to all three activity rows (sedentary/
-  moderate/heavy) for a given nutrient and sex — the floor a target must
-  never be pushed below doesn't change with which activity band the target
-  itself uses. Vitamin D's EAR (10 ug) likewise has no age-band split in the
-  source, so it is attached to both the 18-59 and 60+ rows for both sexes.
-  One consequence worth flagging: the sedentary/heavy B-vitamin rows now
-  carry a directly-published EAR alongside a PAL-derived RDA under the same
-  `source` tag. The schema has one `source` field per row, not one per
-  column, and `ICMR_DERIVED` was chosen to describe the row's RDA (the
-  figure Finding 1/2 were about) — it is not a claim that every number on
-  that row was extrapolated.
+  from the EAR-2020 column (see "CONFIRMED" above). Vitamin D's EAR (10 ug)
+  has no age-band split in the source, so it is attached to both the 18-59
+  and 60+ rows for both sexes, unchanged. For the row placement originally
+  chosen for the four B vitamins' sedentary/heavy rows, and why it was wrong,
+  see "Fix round 2" below.
 
   Finding 4 (test coverage) — `test_b_vitamins_are_indexed_by_activity` only
   pinned the sedentary < moderate invariant for thiamine/male, which is how
   Finding 1 passed silently. Extended to check all four B vitamins x both
   sexes.
+
+Fix round 2 (2026-08-16) — EAR/RDA contradiction introduced by round 1
+------------------------------------------------------------------------
+Round 1 attached the single published (moderate-activity) EAR flat onto all
+three activity rows per B-vitamin/sex, reasoning that the source doesn't
+stratify EAR by activity. That created rows where EAR >= RDA (e.g. thiamine
+male sedentary: EAR 1.5 vs RDA 1.4; vitamin_b6 female sedentary: EAR 1.6 vs
+RDA 1.5) — impossible by the DRI framework's own definition (RDA = EAR + ~2
+SD, so RDA > EAR always) and functionally broken, since the compensation
+engine treats EAR as a floor a target must never be pushed below while RDA
+is the target itself; a floor above the target is unsatisfiable.
+
+The real cause: the published EAR belongs to the *moderate* activity level,
+the same one the published RDA belongs to — it was never "unstratified", it
+was simply never given for sedentary/heavy at all. Copying the moderate EAR
+onto a sedentary RDA mixed two different activity levels in one row.
+
+Fix: sedentary and heavy EARs are now derived by the identical PAL ratio
+already used for RDA (Finding 2's ICMR_DERIVED derivation) — sedentary
+factor = 1.40/1.80 = 0.778, heavy factor = 2.30/1.80 = 1.278 — applied to
+the moderate EAR and rounded to one decimal (e.g. thiamine male: EAR 1.5 x
+0.778 = 1.2 sedentary, 1.5 x 1.278 = 1.9 heavy). Both numbers in a
+sedentary/heavy row now describe the same activity level, and EAR < RDA
+holds on every row in RDA_ROWS — checked by a new whole-table invariant test
+(below) rather than per-nutrient spot checks, since "RDA exceeds EAR" is a
+property of the DRI framework itself, not something specific to any one
+nutrient. `ICMR_DERIVED` stays on these rows; if anything the tag is more
+accurate now, since both fields on the row are extrapolated, not just one.
 """
 
 from sqlalchemy import select
@@ -189,40 +208,41 @@ RDA_ROWS: list[tuple] = [
     ("vitamin_c", "female", "18-59", None, 55, 65, None, ICMR),
 
     # Energy-scaled B vitamins, by activity level. The moderate-activity RDA
-    # (and its matching EAR) is the one figure the brief note actually
-    # publishes; sedentary and heavy are derived from it via ICMR's PAL
-    # ratios (see ICMR_DERIVED above) and tagged accordingly. Each nutrient's
-    # EAR is not activity-stratified in the source, so the same published EAR
-    # is attached to all three activity rows for a given sex — the adequacy
-    # floor does not depend on which activity band a user's target uses.
-    ("thiamine", "male", "18-59", "sedentary", 1.5, 1.4, None, ICMR_DERIVED),
+    # and EAR are the figures the brief note actually publishes; sedentary
+    # and heavy RDA *and* EAR are both derived from the moderate column via
+    # ICMR's PAL ratios (sedentary 1.40/1.80 = 0.778, heavy 2.30/1.80 = 1.278)
+    # and tagged ICMR_DERIVED accordingly. Both numbers in a sedentary/heavy
+    # row describe the same activity level this way, which keeps EAR < RDA
+    # holding on every row — see the "Fix round 2" docstring section for why
+    # a flat (moderate) EAR copied onto these rows was wrong.
+    ("thiamine", "male", "18-59", "sedentary", 1.2, 1.4, None, ICMR_DERIVED),
     ("thiamine", "male", "18-59", "moderate", 1.5, 1.8, None, ICMR),
-    ("thiamine", "male", "18-59", "heavy", 1.5, 2.3, None, ICMR_DERIVED),
-    ("thiamine", "female", "18-59", "sedentary", 1.4, 1.4, None, ICMR_DERIVED),
+    ("thiamine", "male", "18-59", "heavy", 1.9, 2.3, None, ICMR_DERIVED),
+    ("thiamine", "female", "18-59", "sedentary", 1.1, 1.4, None, ICMR_DERIVED),
     ("thiamine", "female", "18-59", "moderate", 1.4, 1.7, None, ICMR),
-    ("thiamine", "female", "18-59", "heavy", 1.4, 2.2, None, ICMR_DERIVED),
-    ("riboflavin", "male", "18-59", "sedentary", 2.1, 2.0, None, ICMR_DERIVED),
+    ("thiamine", "female", "18-59", "heavy", 1.8, 2.2, None, ICMR_DERIVED),
+    ("riboflavin", "male", "18-59", "sedentary", 1.6, 2.0, None, ICMR_DERIVED),
     ("riboflavin", "male", "18-59", "moderate", 2.1, 2.5, None, ICMR),
-    ("riboflavin", "male", "18-59", "heavy", 2.1, 3.2, None, ICMR_DERIVED),
-    ("riboflavin", "female", "18-59", "sedentary", 2.0, 1.9, None, ICMR_DERIVED),
+    ("riboflavin", "male", "18-59", "heavy", 2.7, 3.2, None, ICMR_DERIVED),
+    ("riboflavin", "female", "18-59", "sedentary", 1.6, 1.9, None, ICMR_DERIVED),
     ("riboflavin", "female", "18-59", "moderate", 2.0, 2.4, None, ICMR),
-    ("riboflavin", "female", "18-59", "heavy", 2.0, 3.1, None, ICMR_DERIVED),
-    ("niacin", "male", "18-59", "sedentary", 15, 14, None, ICMR_DERIVED),
+    ("riboflavin", "female", "18-59", "heavy", 2.6, 3.1, None, ICMR_DERIVED),
+    ("niacin", "male", "18-59", "sedentary", 11.7, 14, None, ICMR_DERIVED),
     ("niacin", "male", "18-59", "moderate", 15, 18, None, ICMR),
-    ("niacin", "male", "18-59", "heavy", 15, 23, None, ICMR_DERIVED),
-    ("niacin", "female", "18-59", "sedentary", 12, 11, None, ICMR_DERIVED),
+    ("niacin", "male", "18-59", "heavy", 19.2, 23, None, ICMR_DERIVED),
+    ("niacin", "female", "18-59", "sedentary", 9.3, 11, None, ICMR_DERIVED),
     ("niacin", "female", "18-59", "moderate", 12, 14, None, ICMR),
-    ("niacin", "female", "18-59", "heavy", 12, 18, None, ICMR_DERIVED),
-    ("vitamin_b6", "male", "18-59", "sedentary", 2.1, 1.9, None, ICMR_DERIVED),
+    ("niacin", "female", "18-59", "heavy", 15.3, 18, None, ICMR_DERIVED),
+    ("vitamin_b6", "male", "18-59", "sedentary", 1.6, 1.9, None, ICMR_DERIVED),
     ("vitamin_b6", "male", "18-59", "moderate", 2.1, 2.4, None, ICMR),
-    ("vitamin_b6", "male", "18-59", "heavy", 2.1, 3.1, None, ICMR_DERIVED),
-    # Female B6 sedentary was mistranscribed as 1.9 (identical to moderate,
-    # violating sedentary < moderate). Corrected to 1.9 x 0.779 = 1.48 -> 1.5,
-    # the same sedentary:moderate PAL ratio (1.40/1.80) used for every other
-    # row in this block.
-    ("vitamin_b6", "female", "18-59", "sedentary", 1.6, 1.5, None, ICMR_DERIVED),
+    ("vitamin_b6", "male", "18-59", "heavy", 2.7, 3.1, None, ICMR_DERIVED),
+    # Female B6 sedentary RDA was mistranscribed as 1.9 (identical to
+    # moderate, violating sedentary < moderate). Corrected to
+    # 1.9 x 0.778 = 1.48 -> 1.5, the same sedentary:moderate PAL ratio used
+    # for every other row in this block.
+    ("vitamin_b6", "female", "18-59", "sedentary", 1.2, 1.5, None, ICMR_DERIVED),
     ("vitamin_b6", "female", "18-59", "moderate", 1.6, 1.9, None, ICMR),
-    ("vitamin_b6", "female", "18-59", "heavy", 1.6, 2.4, None, ICMR_DERIVED),
+    ("vitamin_b6", "female", "18-59", "heavy", 2.0, 2.4, None, ICMR_DERIVED),
 ]
 
 # (nutrient, value, supplemental_only, source)

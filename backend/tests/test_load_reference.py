@@ -3,7 +3,7 @@ import pytest
 from app.models.nutrient import Nutrient
 from app.models.reference import RdaReference, UpperLimit
 from etl.load_nutrients import seed_nutrients
-from etl.load_reference import seed_reference
+from etl.load_reference import RDA_ROWS, seed_reference
 
 
 def _rda(db, nutrient_code, sex, activity=None, age_band="18-59"):
@@ -78,6 +78,20 @@ def test_sedentary_is_always_below_moderate_below_heavy(db, nutrient_code, sex):
     heavy = _rda(db, nutrient_code, sex, activity="heavy")
 
     assert sedentary.rda < moderate.rda < heavy.rda
+
+
+def test_ear_never_exceeds_rda():
+    """RDA is defined as EAR plus roughly two standard deviations, so RDA > EAR
+    must hold wherever a row gives both — an EAR at or above its own RDA would
+    hand the compensation engine a floor above its own target. Universal
+    property of the DRI framework, so checked across the whole table rather
+    than per nutrient (this is what let round 1's flat-copied B-vitamin EARs
+    slip through: EAR >= RDA on several sedentary rows)."""
+    for code, sex, age_band, activity, ear, rda, ai, source in RDA_ROWS:
+        if ear is not None and rda is not None:
+            assert ear < rda, (
+                f"{code}/{sex}/{age_band}/{activity}: EAR {ear} >= RDA {rda} ({source})"
+            )
 
 
 def test_elderly_calcium_and_vitamin_d_rise(db):
