@@ -49,7 +49,17 @@ def load_recipes(db: Session, recipes: Iterable) -> int:
         dish.yield_factor = recipe.yield_factor
         db.flush()
 
-        db.query(DishIngredient).filter_by(dish_id=dish.id).delete()
+        # Flush immediately after each bulk delete, before the replacement rows
+        # are added. `SessionLocal` is built with autoflush=False, so without
+        # this the inserts sit pending while later iterations issue their own
+        # DELETEs, and the statement order across the 72-dish loop stops being
+        # something this function pins down. `synchronize_session=False` keeps
+        # the delete from scanning the whole identity map, which in the
+        # orchestrator's single long-lived session is tens of thousands of rows.
+        db.query(DishIngredient).filter_by(dish_id=dish.id).delete(
+            synchronize_session=False
+        )
+        db.flush()
         for code, grams in recipe.ingredients:
             db.add(
                 DishIngredient(
@@ -57,7 +67,10 @@ def load_recipes(db: Session, recipes: Iterable) -> int:
                 )
             )
 
-        db.query(PortionMeasure).filter_by(dish_id=dish.id).delete()
+        db.query(PortionMeasure).filter_by(dish_id=dish.id).delete(
+            synchronize_session=False
+        )
+        db.flush()
         for index, (measure_name, grams) in enumerate(recipe.measures):
             db.add(
                 PortionMeasure(
@@ -70,6 +83,10 @@ def load_recipes(db: Session, recipes: Iterable) -> int:
                 )
             )
 
+        # And once more before moving on, so a dish's rows are fully written
+        # before the next dish's DELETEs run rather than trailing an iteration
+        # behind them.
+        db.flush()
         loaded += 1
 
     db.flush()

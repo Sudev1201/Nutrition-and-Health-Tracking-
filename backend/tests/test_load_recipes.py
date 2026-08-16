@@ -1,4 +1,5 @@
 import pytest
+from sqlalchemy import func
 
 from app.models.food import Dish, DishIngredient, Ingredient, PortionMeasure
 from etl.load_nutrients import seed_nutrients
@@ -318,3 +319,40 @@ def test_loading_the_whole_seed_set(db):
     assert db.query(Dish).count() == len(RECIPES)
     assert db.query(DishIngredient).count() == sum(len(r.ingredients) for r in RECIPES)
     assert db.query(PortionMeasure).count() == sum(len(r.measures) for r in RECIPES)
+
+
+def test_reloading_the_whole_seed_set_lands_on_the_exact_expected_totals(db):
+    """Loads the full 72-dish set twice in ONE session and pins the exact
+    expected DishIngredient/PortionMeasure totals both times -- not merely
+    "unchanged between the two loads", which a bug that stabilises on a wrong
+    number (e.g. orphaned rows a delete failed to clear) could still pass.
+    Asserting against `sum(len(r.ingredients) for r in RECIPES)` /
+    `sum(len(r.measures) for r in RECIPES)` catches that shape of bug too.
+    """
+    seed_nutrients(db)
+    from etl.common import cached_download
+    from etl.load_ifct import IFCT_URL, load_ifct
+    from etl.load_manual_ingredients import seed_manual_ingredients
+
+    load_ifct(db, cached_download(IFCT_URL, "ifct_compositions.csv"))
+    seed_manual_ingredients(db)
+
+    expected_ingredients = sum(len(r.ingredients) for r in RECIPES)
+    expected_measures = sum(len(r.measures) for r in RECIPES)
+    expected_per_dish = {r.code: len(r.ingredients) for r in RECIPES}
+
+    def per_dish_ingredient_counts():
+        return dict(
+            db.query(Dish.code, func.count(DishIngredient.id))
+            .join(DishIngredient, DishIngredient.dish_id == Dish.id)
+            .group_by(Dish.code)
+            .all()
+        )
+
+    for pass_number in (1, 2):
+        load_recipes(db, RECIPES)
+        assert db.query(DishIngredient).count() == expected_ingredients, pass_number
+        assert db.query(PortionMeasure).count() == expected_measures, pass_number
+        # Totals alone would still pass if one dish kept an orphan row and
+        # another lost one, so pin the shape as well as the sum.
+        assert per_dish_ingredient_counts() == expected_per_dish, pass_number
