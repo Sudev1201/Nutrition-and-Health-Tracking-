@@ -7,8 +7,8 @@ begins.
 
 | # | Plan | Deliverable | Status |
 |---|---|---|---|
-| 1 | Foundation, auth & households | Sign in with Google, create a household, invite a member, land on a protected shell | **Written** — `2026-08-15-foundation-auth-households.md` |
-| 2 | Food & reference data | INDB recipes, IFCT ingredients, USDA gap-fillers, ICMR RDA/EAR/TUL tables, all source-tagged and queryable | Not started |
+| 1 | Foundation, auth & households | Sign in with Google, optional household, protected shell | **Complete** — `2026-08-15-foundation-auth-households.md` |
+| 2 | Food & reference data | IFCT ingredients (unit-normalised), authored South Indian recipes, INDB reference dishes, USDA gap-fill, ICMR RDA/TUL tables — all source-tagged and searchable | **Written** — `2026-08-16-food-reference-data.md` |
 | 3 | `nutrition_core` | Energy, targets, condition rules, drug interactions, compensation ledger — pure logic, heaviest test coverage | Not started |
 | 4 | Onboarding & daily targets | Profile questionnaire, meal times, observance rules, usual-intake wizard, first computed targets | Not started |
 | 5 | Logging & daily dashboard | Per-slot meal logging, editable dish ingredients, restaurant/estimated entries, today's view | Not started |
