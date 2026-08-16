@@ -1,9 +1,14 @@
+import csv
+
 import pytest
 
 from app.models.food import Ingredient, IngredientNutrient
 from app.models.nutrient import Nutrient
+from etl.common import cached_download
+from etl.load_ifct import IFCT_URL
 from etl.load_nutrients import seed_nutrients
-from etl.load_usda import load_usda_gapfill
+from etl.load_usda import CURATED_ANIMAL_MAP, LEGACY_ANIMAL_MAP, load_usda_gapfill
+from etl.recipes.south_indian import RECIPES
 
 
 @pytest.fixture
@@ -23,6 +28,8 @@ def usda_files(tmp_path):
         "322892,foundation_food,\"Milk, whole, 3.25% milkfat, with added vitamin D\"\n"
         "748967,foundation_food,\"Eggs, Grade A, Large, egg whole\"\n"
         "2684442,foundation_food,\"Fish, tilapia, farm raised, raw\"\n"
+        "331897,foundation_food,\"Chicken, broilers or fryers, drumstick, meat only,"
+        " cooked, braised\"\n"
     )
     (tmp_path / "nutrient.csv").write_text(
         "id,name,unit_name\n"
@@ -37,6 +44,8 @@ def usda_files(tmp_path):
         "4,748967,1100,49.1\n"
         "5,2684442,1178,0.7594\n"
         "6,2684442,1100,4.145\n"
+        "7,331897,1178,0.41\n"
+        "8,331897,1100,1.5\n"
     )
     return tmp_path
 
@@ -205,6 +214,93 @@ def test_egg_gets_b12_but_no_iodine(db, usda_files):
     assert b12.per_100g == pytest.approx(1.02)
     assert b12.source == "USDA"
     assert _value(db, egg.id, "iodine") is None
+
+
+def test_chicken_gets_b12_but_no_iodine(db, usda_files):
+    """Poultry iodine tracks feed supplementation -- the same exogenous-source
+    concern as hen egg. B12 is a property of the bird."""
+    seed_nutrients(db)
+    chicken = Ingredient(
+        code="ifct:N001",
+        name="Chicken, poultry, leg, skinless",
+        source="IFCT",
+        food_group="Poultry",
+    )
+    db.add(chicken)
+    db.flush()
+
+    _run(db, usda_files)
+
+    b12 = _value(db, chicken.id, "vitamin_b12")
+    assert b12 is not None
+    assert b12.per_100g == pytest.approx(0.41)
+    assert b12.source == "USDA"
+    assert _value(db, chicken.id, "iodine") is None
+
+
+def test_a_species_foundation_lacks_gets_b12_from_sr_legacy(db, usda_files):
+    """USDA Foundation carries no sardine, mackerel, anchovy or seer under any
+    spelling, so those pair to SR Legacy instead -- tagged distinctly so the
+    release a number came from stays visible."""
+    seed_nutrients(db)
+    sardine = Ingredient(
+        code="ifct:P071", name="Sardine", source="IFCT", food_group="Marine Fish"
+    )
+    db.add(sardine)
+    db.flush()
+
+    _run(db, usda_files)
+
+    b12 = _value(db, sardine.id, "vitamin_b12")
+    assert b12 is not None
+    assert b12.per_100g == pytest.approx(8.94)
+    assert b12.source == "USDA:SR-legacy"
+
+
+def test_the_curated_maps_cover_every_animal_ingredient_the_recipes_use(db):
+    """THE COVERAGE GUARD, at the map level.
+
+    Task 4 curated salmon, tilapia and catfish; task 6 then wrote recipes
+    around mackerel, anchovy, sardine, vanjaram and chicken. Zero overlap, so
+    eight fish dishes and the chicken curry reported a hard 0.0 ug of B12 --
+    a nutrient absent from an ingredient contributes nothing to a sum that is
+    still presented as complete. This pins the two sides together: any future
+    recipe reaching for an uncurated animal ingredient fails here, in a map,
+    rather than silently in a dish total.
+    """
+    animal_groups = {
+        "Marine Fish",
+        "Animal Meat",
+        "Poultry",
+        "Egg and Egg Products",
+        "Fresh Water Fish and Shellfish",
+        "Marine Shellfish",
+        "Marine Mollusks",
+        "Milk and Milk Products",
+    }
+    covered = set(CURATED_ANIMAL_MAP) | set(LEGACY_ANIMAL_MAP) | {
+        # The manual ingredients carry their own transcribed B12 -- see
+        # etl/load_manual_ingredients.py.
+        "usda:curd",
+    }
+
+    used = {code for recipe in RECIPES for code, _ in recipe.ingredients}
+    ifct_groups = {
+        f"ifct:{row['code']}": row["grup"]
+        for row in csv.DictReader(
+            cached_download(IFCT_URL, "ifct_compositions.csv").open(
+                newline="", encoding="utf-8"
+            )
+        )
+    }
+    animal_used = {
+        code
+        for code in used
+        if ifct_groups.get(code) in animal_groups or code == "usda:curd"
+    }
+
+    assert animal_used
+    assert animal_used - covered == set()
 
 
 def test_running_twice_does_not_duplicate_rows(db, usda_files):

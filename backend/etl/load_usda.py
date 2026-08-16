@@ -48,6 +48,9 @@ PLANT_B12_ZERO_GROUPS = frozenset(
 PLANT_B12_ZERO_SOURCE = "derived:plant-b12-zero"
 
 
+SR_LEGACY_SOURCE = "USDA:SR-legacy"
+
+
 class CuratedPairing(NamedTuple):
     """One IFCT ingredient's pairing to a specific USDA food, and which of
     USDA_NUTRIENT_MAP's nutrients that pairing is trusted to supply.
@@ -59,6 +62,20 @@ class CuratedPairing(NamedTuple):
 
     fdc_id: str
     nutrients: frozenset[str]
+
+
+class LegacyPairing(NamedTuple):
+    """A pairing to a USDA Standard Reference Legacy row, and the values
+    transcribed from it.
+
+    Unlike CuratedPairing there is no local CSV to read -- SR Legacy is not
+    part of the Foundation download -- so the numbers live in the source, each
+    beside the fdc_id and description it came from. See LEGACY_ANIMAL_MAP.
+    """
+
+    fdc_id: str
+    description: str
+    values: tuple[tuple[str, float, str], ...]  # (nutrient code, value, unit)
 
 
 # Curated ifct-code -> USDA pairings, picked and verified by hand against the
@@ -107,7 +124,8 @@ class CuratedPairing(NamedTuple):
 #   See ifct:S001 below for the freshwater one, which USDA's entry does match.
 # - ifct:P084 Tuna (Marine Fish): NOT mapped. The only USDA foundation-food
 #   tuna is "canned in water, drained solids" -- a different, processed
-#   preparation from IFCT's raw fish values, not a confident match.
+#   preparation from IFCT's raw fish values, not a confident match. No recipe
+#   uses it, so it is left alone rather than reopened against SR Legacy.
 CURATED_ANIMAL_MAP: dict[str, CuratedPairing] = {
     # Milk and Milk Products. B12 only -- see the intrinsic-vs-exogenous
     # rule above: USDA's 37.9 ug/100g iodine reflects US teat-dip/sanitiser
@@ -133,6 +151,86 @@ CURATED_ANIMAL_MAP: dict[str, CuratedPairing] = {
     "ifct:S001": CuratedPairing(
         "2684445", frozenset({"vitamin_b12", "iodine"})
     ),  # Fish, catfish, farm raised, raw
+    # Poultry. B12 only -- poultry iodine tracks feed iodine supplementation,
+    # the same exogenous-source concern as hen egg and cow milk.
+    #
+    # Preparation caveat, stated rather than hidden: IFCT's N001 is raw leg,
+    # and this is the ONLY chicken row in the whole Foundation release that
+    # reports B12 at all (the eight raw chicken rows report none). Braising
+    # drives off water, so 0.41 ug/100 g is a modest overstatement of the raw
+    # basis -- against a dish that currently reports a confident, fully wrong
+    # 0.0, and 0.41 is small enough that the error is a rounding difference on
+    # a 2.4 ug/day requirement.
+    "ifct:N001": CuratedPairing(
+        "331897", frozenset({"vitamin_b12"})
+    ),  # Chicken, broilers or fryers, drumstick, meat only, cooked, braised
+}
+
+# Species the Foundation release does not carry AT ALL, paired instead to USDA
+# Standard Reference Legacy and transcribed here, exactly as
+# etl/load_manual_ingredients.py does for the five non-IFCT ingredients, and
+# tagged SR_LEGACY_SOURCE so a reader can always tell which release a number
+# came from.
+#
+# Why this exists: task 6 chose the fish South Indian households actually buy,
+# and Foundation's entire finfish set is haddock, pollock, canned tuna, two
+# salmon, tilapia, cod and catfish -- no mackerel, no anchovy, no sardine, no
+# seer, under any spelling. Every ingredient in those dishes carries an
+# explicit derived:plant-b12-zero, so with the fish contributing nothing the
+# eight fish dishes summed to a hard 0.0 ug of B12: filter coffee out-scored
+# fish curry on the nutrient fish is this cuisine's principal source of, and
+# B12 is what drives the vegetarian-observance compensation rule.
+#
+# Selection rule applied to each, in order: closest species (genus, then
+# family), then the same preparation basis as IFCT (raw), then -- where two
+# real rows remain and disagree -- the LOWER figure. Overstating B12 tells a
+# short user they are fine, which is the dangerous direction; understating it
+# only offers compensation that was not needed.
+#
+# Values retrieved 2026-08-17 from https://api.nal.usda.gov/fdc/v1/foods/search
+# (dataType=SR Legacy). SR Legacy reports no iodine for any finfish, so these
+# pairings supply B12 only -- not a judgement about seafood iodine, which the
+# intrinsic-vs-exogenous rule above still permits; there is simply no number.
+LEGACY_ANIMAL_MAP: dict[str, LegacyPairing] = {
+    # Rastrelliger kanagurta, Indian mackerel: a small oily Scombrid, same
+    # tribe (Scombrini) as Atlantic mackerel, and raw. USDA's "mackerel,
+    # Pacific and jack, mixed species, raw" (4.4) was rejected despite being
+    # the lower figure because it blends in jack mackerel, a Carangid -- a
+    # different family. Species first, per the rule above.
+    "ifct:P034": LegacyPairing(
+        "175119", "Fish, mackerel, Atlantic, raw", (("vitamin_b12", 8.71, "ug"),)
+    ),
+    # Stolephorus indicus, Indian anchovy -> Engraulis encrasicolus, European
+    # anchovy. Same family (Engraulidae), raw, and SR Legacy's only raw
+    # anchovy row. The canned-in-oil row (0.88) is a processed basis.
+    "ifct:P003": LegacyPairing(
+        "174182", "Fish, anchovy, european, raw", (("vitamin_b12", 0.62, "ug"),)
+    ),
+    # Sardinella longiceps, Indian oil sardine. The one pairing here that is
+    # NOT raw: SR Legacy has no raw sardine at all, only two canned rows.
+    # Chosen over the raw Clupeids that were the alternative -- herring,
+    # Atlantic, raw (13.7) and herring, Pacific, raw (10.0) -- because a
+    # sardine is the same fish type and those are not, and because both of
+    # them read HIGHER, so this is the conservative choice of the three rather
+    # than the flattering one. Canning in oil and draining concentrates
+    # per-100 g values against a raw basis, so if 8.94 is wrong for Indian oil
+    # sardine it is wrong on the high side; that is stated here rather than
+    # left for a reader to discover.
+    "ifct:P071": LegacyPairing(
+        "175139",
+        "Fish, sardine, Atlantic, canned in oil, drained solids with bone",
+        (("vitamin_b12", 8.94, "ug"),),
+    ),
+    # Scomberomorus commerson, vanjaram/seer. SR Legacy has two raw rows in
+    # the SAME genus and they disagree by 6.5x: king (S. cavalla, 15.6) and
+    # spanish (S. maculatus, 2.4). Genus does not separate them, so the
+    # tiebreak is the name -- FAO's English name for S. commerson is
+    # "narrow-barred Spanish mackerel" -- and then the lower figure. Both
+    # candidates are recorded here because the choice is a judgement, not a
+    # lookup, and a later reader may have better grounds to revisit it.
+    "ifct:P087": LegacyPairing(
+        "173673", "Fish, mackerel, spanish, raw", (("vitamin_b12", 2.4, "ug"),)
+    ),
 }
 
 
@@ -169,6 +267,44 @@ def _zero_fill_plant_b12(
             )
         )
         written += 1
+
+    db.flush()
+    return written
+
+
+def _fill_legacy_animal(
+    db: Session,
+    ingredients_by_code: dict[str, Ingredient],
+    nutrients: dict[str, Nutrient],
+) -> int:
+    """Write the SR Legacy pairings for the species Foundation does not carry.
+
+    Same two rules as everything else here: never overwrite an existing value,
+    and never invent one -- an ifct code with no entry in LEGACY_ANIMAL_MAP
+    stays NULL.
+    """
+    written = 0
+    for ifct_code, pairing in LEGACY_ANIMAL_MAP.items():
+        ingredient = ingredients_by_code.get(ifct_code)
+        if ingredient is None:
+            continue
+
+        for nutrient_code, value, unit in pairing.values:
+            nutrient = nutrients.get(nutrient_code)
+            if nutrient is None:
+                continue
+            if _existing(db, ingredient.id, nutrient.id) is not None:
+                continue
+
+            db.add(
+                IngredientNutrient(
+                    ingredient_id=ingredient.id,
+                    nutrient_id=nutrient.id,
+                    per_100g=to_canonical(value, unit, nutrient.unit),
+                    source=SR_LEGACY_SOURCE,
+                )
+            )
+            written += 1
 
     db.flush()
     return written
@@ -261,7 +397,9 @@ def load_usda_gapfill(
       0.0 (PLANT_B12_ZERO_GROUPS / PLANT_B12_ZERO_SOURCE);
     - a small, hand-verified set of animal foods (CURATED_ANIMAL_MAP) gets
       B12 and/or iodine from a specific named USDA row, per-nutrient, per
-      the intrinsic-vs-exogenous rule documented above the map.
+      the intrinsic-vs-exogenous rule documented above the map;
+    - the species Foundation does not carry at all (LEGACY_ANIMAL_MAP) get
+      B12 from a named SR Legacy row, transcribed in this file.
     Everything else stays NULL -- unknown must read as unknown. An existing
     IngredientNutrient row is never overwritten; IFCT is the authority for
     Indian foods where it has data.
@@ -273,4 +411,5 @@ def load_usda_gapfill(
     written += _fill_curated_animal(
         db, ingredients_by_code, nutrients, food_csv, nutrient_csv, food_nutrient_csv
     )
+    written += _fill_legacy_animal(db, ingredients_by_code, nutrients)
     return written
