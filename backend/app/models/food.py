@@ -42,7 +42,9 @@ class IngredientNutrient(TimestampedBase):
     )
     # Always in the nutrient's canonical unit, per 100 g of edible portion.
     per_100g: Mapped[float] = mapped_column(Float)
-    source: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    # "IFCT" | "USDA" | "derived:plant-b12-zero" (see etl/load_usda.py) —
+    # widened from 16 to fit the derived-value tag.
+    source: Mapped[str | None] = mapped_column(String(32), nullable=True)
 
 
 class Dish(TimestampedBase):
