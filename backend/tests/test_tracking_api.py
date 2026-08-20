@@ -489,6 +489,86 @@ def test_a_disabled_snack_survives_a_profile_round_trip(signed_in, reference_dat
     assert snack1["is_enabled"] is False
 
 
+# --- an unmeasured nutrient is unknown, not zero -----------------------------
+#
+# A nutrient with no row on any of a day's foods contributed nothing to the
+# totals, and `consumed.get(code, 0.0)` then turned that silence into a confident
+# zero. The zero read as a full shortfall, and for a compensable nutrient the
+# shortfall was carried forward two days -- so a coverage gap in the food tables
+# manufactured a deficit the user never had.
+#
+# The fixture dish carries energy, protein and calcium only. Every other seeded
+# nutrient -- potassium, B12, thiamine, fibre -- has no row on it at all.
+
+
+def test_a_measured_nutrient_reports_full_coverage(signed_in, reference_data):
+    signed_in.put("/profile", json=PROFILE)
+    log_small_meal(signed_in, reference_data, TODAY)
+
+    calcium = nutrient(signed_in.get(f"/targets/today?date={TODAY}").json(), "calcium")
+
+    assert calcium["coverage"] == pytest.approx(1.0)
+
+
+def test_a_nutrient_no_food_carries_reports_no_coverage(signed_in, reference_data):
+    signed_in.put("/profile", json=PROFILE)
+    log_small_meal(signed_in, reference_data, TODAY)
+
+    potassium = nutrient(signed_in.get(f"/targets/today?date={TODAY}").json(), "potassium")
+
+    assert potassium["coverage"] == pytest.approx(0.0)
+
+
+def test_a_day_with_nothing_logged_reports_no_coverage(signed_in, reference_data):
+    signed_in.put("/profile", json=PROFILE)
+
+    calcium = nutrient(signed_in.get(f"/targets/today?date={TODAY}").json(), "calcium")
+
+    assert calcium["coverage"] == pytest.approx(0.0)
+
+
+def test_an_unmeasured_nutrient_carries_nothing_forward(signed_in, reference_data):
+    """The bug this pins: 100 g of the fixture dish has no potassium row, so a
+    full 3,510 mg shortfall used to be carried into today off the back of a
+    number that was never measured."""
+    signed_in.put("/profile", json=PROFILE)
+    log_small_meal(signed_in, reference_data, YESTERDAY)
+
+    potassium = nutrient(signed_in.get(f"/targets/today?date={TODAY}").json(), "potassium")
+
+    assert potassium["carried_in"] == 0
+
+
+def test_a_measured_shortfall_is_still_carried_forward(signed_in, reference_data):
+    """The other half of it: calcium really was measured and really was short, so
+    the ledger must still move. Silencing every carry would be the opposite bug."""
+    signed_in.put("/profile", json=PROFILE)
+    log_small_meal(signed_in, reference_data, YESTERDAY)
+
+    calcium = nutrient(signed_in.get(f"/targets/today?date={TODAY}").json(), "calcium")
+
+    assert calcium["carried_in"] > 0
+
+
+def test_a_measured_zero_is_not_the_same_as_no_data(signed_in, reference_data):
+    """A food with an explicit 0.0 row has been measured, and its zero is real.
+
+    This is the distinction that makes coverage worth having: `derived:plant-b12-zero`
+    states that a plant food has no B12, which is a finding. An absent row states
+    nothing at all.
+    """
+    signed_in.put("/profile", json=PROFILE)
+    log_small_meal(signed_in, reference_data, TODAY)
+
+    payload = signed_in.get(f"/targets/today?date={TODAY}").json()
+    protein = nutrient(payload, "protein")
+    thiamine = nutrient(payload, "thiamine")
+
+    # Protein has a row and a real figure; thiamine has no row on this dish.
+    assert protein["coverage"] == pytest.approx(1.0)
+    assert thiamine["coverage"] == pytest.approx(0.0)
+
+
 def test_the_tracking_endpoints_require_sign_in(api_client):
     assert api_client.get("/profile").status_code == 401
     assert api_client.get(f"/targets/today?date={TODAY}").status_code == 401

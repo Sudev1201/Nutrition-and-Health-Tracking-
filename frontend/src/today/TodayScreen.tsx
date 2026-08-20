@@ -37,6 +37,7 @@ function nutrientBarProps(nutrient: NutrientProgress) {
     ear: nutrient.ear,
     tul: nutrient.tul,
     kind: nutrient.kind,
+    coverage: nutrient.coverage,
     carriedIn: nutrient.carried_in,
     carriedFrom: nutrient.carried_from ?? undefined,
   }

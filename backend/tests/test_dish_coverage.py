@@ -15,7 +15,7 @@ different dish.
 import pytest
 from sqlalchemy import text
 
-from app.foods.nutrition import compute_dish_nutrients
+from app.foods.nutrition import compute_dish_nutrients, dish_coverage
 from app.models.food import Dish, DishIngredient, Ingredient
 from etl.common import cached_download
 from etl.load_ifct import IFCT_URL, load_ifct
@@ -124,3 +124,55 @@ def test_a_fish_dish_out_scores_a_cup_of_coffee_for_b12(seeded):
     coffee = compute_dish_nutrients(seeded, dishes["si:filter_coffee_sugar"])["vitamin_b12"]
     for code in ("si:fish_kuzhambu_sardine", "si:fish_fry_vanjaram"):
         assert compute_dish_nutrients(seeded, dishes[code])["vitamin_b12"] > coffee, code
+
+
+# --- iodine: the gap that cannot be closed by filling it ---------------------
+#
+# Unlike free sugar and B12, iodine has no defensible zero-fill. IFCT publishes
+# none, INDB publishes none, and USDA's dairy and egg figures reflect US iodophor
+# sanitiser and feed-fortification practice rather than the food itself -- which
+# is why `load_usda` refuses them and `manual:salt` takes its figure from FSSAI.
+#
+# So "never reports zero iodine" is not a satisfiable invariant here. The
+# invariant that *is* satisfiable, and the one that matters, is that a dish must
+# not present a partial iodine figure as though it were complete.
+
+
+def test_a_dish_reports_how_much_of_its_iodine_figure_is_measured(seeded):
+    """Every authored dish is either honest about iodine or has no iodine number.
+
+    A figure with no coverage alongside it is the defect: iodine reaches the
+    database on exactly one ingredient that any recipe uses -- iodised salt -- so
+    a dish that reports iodine is reporting salt, and the rest of its weight is
+    unmeasured.
+    """
+    offenders = {}
+    for dish in _groups_by_dish(seeded):
+        amount = compute_dish_nutrients(seeded, dish).get("iodine")
+        if amount is None:
+            continue
+        coverage = dish_coverage(seeded, dish).get("iodine", 0.0)
+        if coverage <= 0.0 or coverage > 1.0:
+            offenders[dish.code] = coverage
+
+    assert offenders == {}
+
+
+def test_a_salted_dish_does_not_claim_its_whole_weight_was_measured_for_iodine(seeded):
+    """Salt is a few grams in a few hundred, so coverage must read as the small
+    fraction it is. If this ever reports 1.0, iodine has been zero-filled onto
+    ingredients nobody measured."""
+    dishes = {dish.code: dish for dish in _groups_by_dish(seeded)}
+    salted = [
+        code
+        for code, dish in dishes.items()
+        if compute_dish_nutrients(seeded, dish).get("iodine")
+    ]
+    assert salted, "expected at least one dish to carry iodine from iodised salt"
+
+    overclaiming = {
+        code: dish_coverage(seeded, dishes[code]).get("iodine", 0.0)
+        for code in salted
+        if dish_coverage(seeded, dishes[code]).get("iodine", 0.0) >= 1.0
+    }
+    assert overclaiming == {}

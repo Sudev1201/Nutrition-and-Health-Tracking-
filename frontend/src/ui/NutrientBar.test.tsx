@@ -89,3 +89,61 @@ test('draws no limit marker for a nutrient ICMR set no limit for', () => {
 
   expect(screen.queryByTitle(/upper limit/i)).not.toBeInTheDocument()
 })
+
+// --- an unmeasured nutrient ---------------------------------------------------
+//
+// A nutrient no food that day carried a figure for has `coverage: 0`, and its
+// `consumed` is silence rather than zero. Drawing an empty bar would state that
+// the user ate none of it, which is a claim the data does not support.
+
+test('a nutrient nothing measured says so instead of showing an empty bar', () => {
+  render(
+    <NutrientBar
+      name="Iodine"
+      unit="ug"
+      consumed={0}
+      target={150}
+      ear={null}
+      tul={900}
+      kind="target"
+      coverage={0}
+    />,
+  )
+
+  expect(screen.getByText(/not measured/i)).toBeInTheDocument()
+})
+
+test('a partly measured nutrient says how much of the day it speaks for', () => {
+  render(
+    <NutrientBar
+      name="Iodine"
+      unit="ug"
+      consumed={150}
+      target={150}
+      ear={null}
+      tul={900}
+      kind="target"
+      coverage={0.02}
+    />,
+  )
+
+  expect(screen.getByText(/2% of what you ate/i)).toBeInTheDocument()
+})
+
+test('a fully measured nutrient carries no caveat', () => {
+  render(
+    <NutrientBar
+      name="Calcium"
+      unit="mg"
+      consumed={800}
+      target={1000}
+      ear={800}
+      tul={2500}
+      kind="target"
+      coverage={1}
+    />,
+  )
+
+  expect(screen.queryByText(/not measured/i)).not.toBeInTheDocument()
+  expect(screen.queryByText(/of what you ate/i)).not.toBeInTheDocument()
+})

@@ -26,9 +26,28 @@ export interface NutrientProgress {
   /** Weekday the carry came from, e.g. "Friday". Null when carried_in is 0. */
   carried_from: string | null
   consumed: number
+  /**
+   * The share of the day's food weight that actually carried a figure for this
+   * nutrient, 0 to 1.
+   *
+   * 0 means nothing measured it, so `consumed` is silence rather than zero — the
+   * distinction that stops a gap in the food tables reading as a deficit. Iodine
+   * is the sharpest case: it reaches the database on iodised salt and almost
+   * nothing else.
+   */
+  coverage: number
 }
 
-export type WarningKind = 'condition-conflict' | 'above-limit' | 'medication-timing'
+/**
+ * `drug-interaction` is emitted by the backend today; it was missing here, so a
+ * potassium-on-ACE-inhibitor or warfarin warning arrived as a kind the UI did
+ * not know. `above-limit` is the one the backend never sends — it is a per-
+ * nutrient status, not a day-level warning — and is kept out for that reason.
+ */
+export type WarningKind =
+  | 'condition-conflict'
+  | 'medication-timing'
+  | 'drug-interaction'
 
 export interface TodayWarning {
   kind: WarningKind

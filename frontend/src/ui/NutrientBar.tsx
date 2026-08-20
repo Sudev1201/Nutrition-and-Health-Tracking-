@@ -15,6 +15,12 @@ export interface NutrientBarProps {
   /** Tolerable Upper Limit, or null where ICMR set none. */
   tul: number | null
   kind: NutrientKind
+  /**
+   * The share of the day's food weight that carried a figure for this nutrient,
+   * 0 to 1. Optional so existing callers keep working; when it is 0, `consumed`
+   * is silence rather than zero and the bar must not imply the user ate none.
+   */
+  coverage?: number
   /** What the ledger added to today's target. */
   carriedIn?: number
   /** The weekday that carry came from, e.g. "Friday". */
@@ -29,9 +35,15 @@ export function NutrientBar({
   ear,
   tul,
   kind,
+  coverage,
   carriedIn,
   carriedFrom,
 }: NutrientBarProps) {
+  // Nothing that day carried a figure for this nutrient, so there is no reading
+  // to draw. An empty bar would say the user ate none of it, which is a claim
+  // the food tables cannot support -- iodine is the sharpest case, reaching the
+  // database on iodised salt and almost nothing else.
+  const unmeasured = coverage !== undefined && coverage <= 0
   // Status is judged against today's effective target, because that is what the
   // app is actually asking of you -- but against the real TUL, never an adjusted
   // one, since the spec forbids an adjusted target from exceeding the limit.
@@ -46,6 +58,23 @@ export function NutrientBar({
   const showLimitTick = tul !== null && tul <= scaleMax
 
   const amounts = `${formatAmount(consumed, unit)} / ${formatWithUnit(target, unit)}`
+
+  if (unmeasured) {
+    return (
+      <div className="py-3">
+        <div className="flex items-baseline justify-between gap-3">
+          <span className="text-sm font-medium">{name}</span>
+          <span className="text-sm text-text-muted">
+            — / {formatWithUnit(target, unit)}
+          </span>
+        </div>
+        <p className="mt-1 text-xs text-text-muted">
+          Not measured — none of today’s food has a figure for this, so the app
+          cannot say how much you had.
+        </p>
+      </div>
+    )
+  }
 
   return (
     <div className="py-3">
@@ -107,6 +136,16 @@ export function NutrientBar({
         {carriedIn !== undefined && carriedIn > 0 && carriedFrom !== undefined && (
           <span className="text-carried">
             {`+${formatAmount(carriedIn, unit)} ${unitLabel(unit)} carried from ${carriedFrom}`}
+          </span>
+        )}
+        {/*
+          Partial coverage is reported rather than hidden behind a threshold.
+          Deciding where "enough" begins would be inventing a number; saying what
+          share the figure speaks for lets the reader judge it.
+        */}
+        {coverage !== undefined && coverage > 0 && coverage < 0.995 && (
+          <span className="text-text-muted">
+            {`Measured for ${Math.round(coverage * 100)}% of what you ate`}
           </span>
         )}
       </div>

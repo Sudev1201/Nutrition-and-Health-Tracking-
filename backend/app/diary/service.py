@@ -5,7 +5,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.foods.measures import format_quantity, measures_for_food, resolve_grams
-from app.foods.nutrition import nutrients_for_portion
+from app.foods.nutrition import dish_coverage, nutrients_for_portion
 from app.models.diary import MealLog, MealSlotSkip
 from app.models.food import Dish, Ingredient, IngredientNutrient
 from app.models.nutrient import Nutrient
@@ -93,6 +93,41 @@ def entry_nutrients(db: Session, entry: MealLog) -> dict[str, float]:
         return _ingredient_nutrients(db, entry.ingredient_id, entry.grams)
 
     return {}
+
+
+def entry_coverage(db: Session, entry: MealLog) -> dict[str, float]:
+    """Per nutrient code, the share of this entry's weight that carried a value."""
+    if entry.dish_id is not None:
+        dish = db.get(Dish, entry.dish_id)
+        return dish_coverage(db, dish) if dish is not None else {}
+
+    if entry.ingredient_id is not None:
+        # A single ingredient either has a row for a nutrient or it does not;
+        # there is no partial weight to apportion.
+        return dict.fromkeys(_ingredient_nutrients(db, entry.ingredient_id, 100.0), 1.0)
+
+    return {}
+
+
+def coverage_on(db: Session, user: User, on_date: datetime.date) -> dict[str, float]:
+    """Per nutrient code, the share of the day's food weight the figure speaks for.
+
+    Weighted by grams, so 400 g of milk with no iodine row and 10 g of salt with
+    one do not count equally. A code absent from the result was measured by
+    nothing at all that day, and its total is silence rather than zero.
+    """
+    covered: dict[str, float] = {}
+    total_grams = 0.0
+
+    for entry in list_entries(db, user, on_date):
+        total_grams += entry.grams
+        for code, share in entry_coverage(db, entry).items():
+            covered[code] = covered.get(code, 0.0) + share * entry.grams
+
+    if total_grams <= 0:
+        return {}
+
+    return {code: min(grams / total_grams, 1.0) for code, grams in covered.items()}
 
 
 def consumed_on(db: Session, user: User, on_date: datetime.date) -> dict[str, float]:

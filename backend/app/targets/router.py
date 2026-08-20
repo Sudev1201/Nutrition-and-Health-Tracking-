@@ -25,6 +25,7 @@ class NutrientOut(BaseModel):
     carried_in: float
     carried_from: str | None
     consumed: float
+    coverage: float
 
 
 class WarningOut(BaseModel):

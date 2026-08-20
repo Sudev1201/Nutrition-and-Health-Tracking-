@@ -47,6 +47,10 @@ class NutrientDay:
     carried_in: float
     carried_from: str | None
     consumed: float
+    # The share of the day's food weight that actually carried a figure for this
+    # nutrient. 0.0 means nothing measured it, so `consumed` is silence rather
+    # than zero -- the distinction the ledger below depends on.
+    coverage: float
 
 
 @dataclass(frozen=True)
@@ -183,6 +187,14 @@ def resolve_day(db: Session, user: User, target_date: datetime.date) -> DayTarge
         # carries the user never earned.
         if consumed:
             for code, target in targets.items():
+                # The per-nutrient counterpart of the rule above. A code absent
+                # from the totals was measured by none of the day's foods, so a
+                # shortfall against it is a gap in the food tables rather than in
+                # the diet -- and carrying it forward would invent a deficit the
+                # user never had.
+                if code not in consumed:
+                    continue
+
                 policy = policies[code]
                 today_target = effective_target(policy, target.rda, carried[day][code])
                 plan = plan_carry(
@@ -198,6 +210,7 @@ def resolve_day(db: Session, user: User, target_date: datetime.date) -> DayTarge
         day += datetime.timedelta(days=1)
 
     consumed_today = diary.consumed_on(db, user, target_date)
+    coverage_today = diary.coverage_on(db, user, target_date)
 
     rows = []
     for code, target in sorted(targets.items()):
@@ -219,6 +232,7 @@ def resolve_day(db: Session, user: User, target_date: datetime.date) -> DayTarge
                 carried_in=carried_in,
                 carried_from=source_day.strftime("%A") if source_day else None,
                 consumed=consumed_today.get(code, 0.0),
+                coverage=coverage_today.get(code, 0.0),
             )
         )
 
