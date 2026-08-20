@@ -34,6 +34,58 @@ export const CONDITION_LABELS: Record<ConditionCode, string> = {
   hyperthyroidism: 'Hyperthyroidism',
 }
 
+/*
+ * Display labels for the coded answers.
+ *
+ * These live here rather than as `<option>` text inside the wizard because the
+ * profile summary has to render the same answers read-only. When the wizard was
+ * the only thing showing them, the words existed only in its markup — and a
+ * summary that retyped them would be free to disagree with the form.
+ *
+ * The hints are the explanatory halves the wizard appends; a summary shows the
+ * label alone, since it is reporting a choice rather than helping make one.
+ */
+
+export const SEX_LABELS: Record<Sex, string> = {
+  female: 'Female',
+  male: 'Male',
+}
+
+export const ACTIVITY_LABELS: Record<ActivityLevel, string> = {
+  sedentary: 'Sedentary',
+  moderate: 'Moderate',
+  heavy: 'Heavy',
+}
+
+export const ACTIVITY_HINTS: Record<ActivityLevel, string> = {
+  sedentary: 'desk work, little exercise',
+  moderate: 'on your feet, or regular exercise',
+  heavy: 'manual work or hard training',
+}
+
+export const GOAL_LABELS: Record<Goal, string> = {
+  lose: 'Lose weight',
+  maintain: 'Maintain',
+  gain: 'Gain weight',
+}
+
+export const PACE_LABELS: Record<Pace, string> = {
+  gentle: 'Gentle',
+  steady: 'Steady',
+}
+
+export const PACE_HINTS: Record<Pace, string> = {
+  gentle: 'about 0.25 kg a week',
+  steady: 'about 0.5 kg a week',
+}
+
+export const DIET_LABELS: Record<DietType, string> = {
+  vegetarian: 'Vegetarian',
+  eggetarian: 'Vegetarian, plus egg',
+  fishetarian: 'Vegetarian, plus fish',
+  'non-vegetarian': 'Non-vegetarian',
+}
+
 export interface Medication {
   name: string
   /** "HH:MM". Load-bearing: the levothyroxine window is checked against it. */

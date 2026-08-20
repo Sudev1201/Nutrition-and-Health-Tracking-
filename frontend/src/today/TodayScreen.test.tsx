@@ -134,9 +134,11 @@ test('sends a user with no profile to onboarding rather than showing an error', 
   )
   renderScreen()
 
+  // Straight into the questionnaire rather than to the summary, which for
+  // someone with no profile would only show an empty state and another button.
   expect(await screen.findByRole('link', { name: /set up your profile/i })).toHaveAttribute(
     'href',
-    '/profile',
+    '/profile/about',
   )
 })
 

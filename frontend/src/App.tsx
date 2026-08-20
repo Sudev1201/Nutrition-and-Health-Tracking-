@@ -5,7 +5,8 @@ import { CycleScreen } from './cycle/CycleScreen'
 import { FoodSearchScreen } from './foods/FoodSearchScreen'
 import { HouseholdScreen } from './households/HouseholdScreen'
 import { LogScreen } from './log/LogScreen'
-import { OnboardingWizard } from './onboarding/OnboardingWizard'
+import { ProfileEditRoute } from './profile/ProfileEditRoute'
+import { ProfileScreen } from './profile/ProfileScreen'
 import { PlanScreen } from './plan/PlanScreen'
 import { RemindersScreen } from './settings/RemindersScreen'
 import { AppShell } from './shell/AppShell'
@@ -59,7 +60,13 @@ export default function App() {
           <Route path="/cycle" element={<CycleScreen />} />
           <Route path="/household" element={<HouseholdScreen />} />
           <Route path="/reminders" element={<RemindersScreen />} />
-          <Route path="/profile" element={<OnboardingWizard />} />
+          {/*
+            The summary is the destination; the questionnaire is reached from it
+            per section. `/profile` used to render the eight-step form itself, so
+            there was no way to read your answers back.
+          */}
+          <Route path="/profile" element={<ProfileScreen />} />
+          <Route path="/profile/:step" element={<ProfileEditRoute />} />
 
           <Route path="/foods" element={<FoodSearchScreen />} />
 

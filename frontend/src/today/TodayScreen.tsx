@@ -69,7 +69,7 @@ export function TodayScreen() {
         description="Your daily targets are computed from your age, weight, activity and any health conditions — so there is nothing to show until you have told us about yourself."
         action={
           <Link
-            to="/profile"
+            to="/profile/about"
             className="inline-flex min-h-11 items-center rounded-control border border-accent bg-accent px-4 text-sm font-medium text-surface"
           >
             Set up your profile

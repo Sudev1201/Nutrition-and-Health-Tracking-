@@ -3,7 +3,16 @@ import { SLOT_LABELS } from '../log/types'
 import { Button } from '../ui/Button'
 import { Checkbox, Field, NumberInput, Select, TextInput, Toggle } from '../ui/fields'
 import { FoodListField } from '../ui/FoodListField'
-import { CONDITION_LABELS } from './types'
+import {
+  ACTIVITY_HINTS,
+  ACTIVITY_LABELS,
+  CONDITION_LABELS,
+  DIET_LABELS,
+  GOAL_LABELS,
+  PACE_HINTS,
+  PACE_LABELS,
+  SEX_LABELS,
+} from './types'
 import type {
   ActivityLevel,
   ConditionCode,
@@ -35,8 +44,11 @@ export function AboutStep({ answers, update }: StepProps) {
             <option value="" disabled>
               Choose…
             </option>
-            <option value="female">Female</option>
-            <option value="male">Male</option>
+            {Object.entries(SEX_LABELS).map(([value, label]) => (
+              <option key={value} value={value}>
+                {label}
+              </option>
+            ))}
           </Select>
         )}
       </Field>
@@ -81,9 +93,11 @@ export function AboutStep({ answers, update }: StepProps) {
             <option value="" disabled>
               Choose…
             </option>
-            <option value="sedentary">Sedentary — desk work, little exercise</option>
-            <option value="moderate">Moderate — on your feet, or regular exercise</option>
-            <option value="heavy">Heavy — manual work or hard training</option>
+            {Object.entries(ACTIVITY_LABELS).map(([value, label]) => (
+              <option key={value} value={value}>
+                {label} — {ACTIVITY_HINTS[value as ActivityLevel]}
+              </option>
+            ))}
           </Select>
         )}
       </Field>
@@ -109,9 +123,11 @@ export function GoalStep({ answers, update }: StepProps) {
             <option value="" disabled>
               Choose…
             </option>
-            <option value="lose">Lose weight</option>
-            <option value="maintain">Maintain</option>
-            <option value="gain">Gain weight</option>
+            {Object.entries(GOAL_LABELS).map(([value, label]) => (
+              <option key={value} value={value}>
+                {label}
+              </option>
+            ))}
           </Select>
         )}
       </Field>
@@ -127,8 +143,11 @@ export function GoalStep({ answers, update }: StepProps) {
               <option value="" disabled>
                 Choose…
               </option>
-              <option value="gentle">Gentle — about 0.25 kg a week</option>
-              <option value="steady">Steady — about 0.5 kg a week</option>
+              {Object.entries(PACE_LABELS).map(([value, label]) => (
+                <option key={value} value={value}>
+                  {label} — {PACE_HINTS[value as Pace]}
+                </option>
+              ))}
             </Select>
           )}
         </Field>
@@ -150,10 +169,11 @@ export function DietStep({ answers, update }: StepProps) {
             <option value="" disabled>
               Choose…
             </option>
-            <option value="vegetarian">Vegetarian</option>
-            <option value="eggetarian">Vegetarian, plus egg</option>
-            <option value="fishetarian">Vegetarian, plus fish</option>
-            <option value="non-vegetarian">Non-vegetarian</option>
+            {Object.entries(DIET_LABELS).map(([value, label]) => (
+              <option key={value} value={value}>
+                {label}
+              </option>
+            ))}
           </Select>
         )}
       </Field>

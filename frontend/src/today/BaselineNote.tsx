@@ -102,7 +102,7 @@ export function BaselineNote({ date }: { date: string }) {
         <p className="mt-1 text-sm text-text-muted">
           You have not described a usual day yet, so the app cannot tell how far today’s target
           is from what you normally eat.{' '}
-          <Link to="/profile" className="text-accent underline">
+          <Link to="/profile/usual" className="text-accent underline">
             Add a usual day
           </Link>{' '}
           and it will work the difference out.

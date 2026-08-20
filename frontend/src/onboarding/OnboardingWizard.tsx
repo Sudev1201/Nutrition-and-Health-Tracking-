@@ -44,8 +44,25 @@ function useSaveProfile() {
   })
 }
 
-export function OnboardingWizard({ onDone }: { onDone?: () => void }) {
-  const [index, setIndex] = useState(0)
+export function OnboardingWizard({
+  onDone,
+  startStep,
+}: {
+  onDone?: () => void
+  /**
+   * Open at this step instead of the first one, so the profile summary's
+   * per-section Edit links land on the section the user asked for rather than
+   * walking them through all eight again.
+   */
+  startStep?: StepId
+}) {
+  const [index, setIndex] = useState(() => {
+    if (startStep === undefined) return 0
+    const found = STEP_ORDER.indexOf(startStep)
+    // An unrecognised step falls back to the beginning rather than rendering
+    // nothing, so a stale or hand-typed URL cannot produce a blank screen.
+    return found === -1 ? 0 : found
+  })
   const [answers, setAnswers] = useState<OnboardingAnswers>(emptyAnswers)
   const [error, setError] = useState<string | null>(null)
   const saveProfile = useSaveProfile()
