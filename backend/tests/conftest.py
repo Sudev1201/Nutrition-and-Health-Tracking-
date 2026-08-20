@@ -7,8 +7,12 @@ from fastapi.testclient import TestClient
 from sqlalchemy import Engine, create_engine, inspect, text
 from sqlalchemy.orm import Session
 
+from app.auth import google as google_auth
 from app.config import settings
 from app.main import app
+from app.models.food import Dish, DishIngredient, Ingredient, IngredientNutrient
+from app.models.nutrient import Nutrient
+from app.models.reference import RdaReference, UpperLimit
 
 BACKEND_ROOT = Path(__file__).resolve().parents[1]
 
@@ -98,3 +102,146 @@ def db(engine) -> Session:
 def client() -> TestClient:
     with TestClient(app) as test_client:
         yield test_client
+
+
+from app.db import get_db
+
+"""
+The test database carries the migrated schema but no seed data — the ETL fills
+the development database, not this one. These tests therefore build the small
+reference set they assert against, which also keeps them independent of whether
+the ETL has been run.
+
+The values are the real ICMR-NIN ones for an adult man, and the compensation
+policy per nutrient mirrors the seeded `nutrients` table.
+"""
+
+NUTRIENTS = [
+    # code, display, unit, category, compensable, days, excess_sensitive
+    ("energy", "Energy", "kcal", "macro", True, 2, True),
+    ("protein", "Protein", "g", "macro", False, 0, False),
+    ("fibre", "Dietary fibre", "g", "macro", True, 2, False),
+    ("carbohydrate", "Carbohydrate", "g", "macro", True, 2, False),
+    ("fat", "Total fat", "g", "macro", True, 2, False),
+    ("saturated_fat", "Saturated fat", "g", "macro", False, 0, True),
+    ("free_sugar", "Free sugar", "g", "macro", False, 0, True),
+    ("calcium", "Calcium", "mg", "mineral", True, 2, True),
+    ("sodium", "Sodium", "mg", "mineral", False, 0, True),
+    ("potassium", "Potassium", "mg", "mineral", True, 2, False),
+    ("vitamin_b12", "Vitamin B12", "ug", "vitamin", True, 2, False),
+    ("thiamine", "Thiamine (B1)", "mg", "vitamin", True, 2, False),
+]
+
+# (code, activity_level, ear, rda, ai)
+REFERENCE_ROWS = [
+    ("calcium", None, 800, 1000, None),
+    ("sodium", None, None, None, 2000),
+    ("potassium", None, None, None, 3510),
+    ("vitamin_b12", None, 2, 2.2, None),
+    # Energy-scaled, so stored per activity level.
+    ("thiamine", "sedentary", 1.2, 1.4, None),
+    ("thiamine", "heavy", 1.9, 2.3, None),
+]
+
+# Calcium has an ICMR limit; B12 deliberately has none.
+UPPER_LIMIT_ROWS = [("calcium", 2500.0)]
+
+
+@pytest.fixture
+def reference_data(db) -> Dish:
+    """Seed the reference tables and one authored dish, returning the dish."""
+    nutrients = {}
+    for code, display, unit, category, compensable, days, excess in NUTRIENTS:
+        nutrient = Nutrient(
+            code=code,
+            display_name=display,
+            unit=unit,
+            category=category,
+            is_compensable=compensable,
+            compensation_days=days,
+            is_excess_sensitive=excess,
+        )
+        db.add(nutrient)
+        nutrients[code] = nutrient
+    db.flush()
+
+    for sex in ("male", "female"):
+        for code, activity, ear, rda, ai in REFERENCE_ROWS:
+            db.add(
+                RdaReference(
+                    nutrient_id=nutrients[code].id,
+                    sex=sex,
+                    age_band="18-59",
+                    activity_level=activity,
+                    ear=ear,
+                    rda=rda,
+                    ai=ai,
+                    source="ICMR-NIN-2020",
+                )
+            )
+
+    for code, value in UPPER_LIMIT_ROWS:
+        db.add(
+            UpperLimit(
+                nutrient_id=nutrients[code].id,
+                value=value,
+                supplemental_only=False,
+                source="ICMR-2018-TUL",
+            )
+        )
+
+    # A deliberately thin dish: 100 g carries far less calcium than a day needs,
+    # so a small portion produces the shortfall the carry-forward tests rely on.
+    ingredient = Ingredient(code="test:rice", name="Rice, cooked", source="IFCT")
+    db.add(ingredient)
+    db.flush()
+    for code, per_100g in (("energy", 150.0), ("protein", 4.0), ("calcium", 30.0)):
+        db.add(
+            IngredientNutrient(
+                ingredient_id=ingredient.id,
+                nutrient_id=nutrients[code].id,
+                per_100g=per_100g,
+                source="IFCT",
+            )
+        )
+
+    dish = Dish(
+        code="test:plain-rice",
+        name="Plain rice",
+        source="authored",
+        is_editable=True,
+        yield_factor=1.0,
+    )
+    db.add(dish)
+    db.flush()
+    db.add(DishIngredient(dish_id=dish.id, ingredient_id=ingredient.id, grams=100.0))
+    db.flush()
+
+    return dish
+
+
+@pytest.fixture
+def api_client(db) -> TestClient:
+    """A client whose requests run inside the test transaction."""
+    app.dependency_overrides[get_db] = lambda: db
+    with TestClient(app) as test_client:
+        yield test_client
+    app.dependency_overrides.clear()
+
+
+@pytest.fixture
+def signed_in(api_client, monkeypatch) -> TestClient:
+    monkeypatch.setattr(
+        google_auth.google_id_token,
+        "verify_oauth2_token",
+        lambda token, request, audience: {
+            "sub": "sub-track",
+            "email": "track@example.com",
+            "email_verified": True,
+            "name": "Tracker",
+        },
+    )
+    api_client.post("/auth/google", json={"credential": "t"})
+    return api_client
+
+

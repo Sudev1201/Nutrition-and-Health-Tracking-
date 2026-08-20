@@ -3,8 +3,11 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.auth.router import router as auth_router
 from app.config import settings
+from app.diary.router import router as diary_router
 from app.foods.router import router as foods_router
 from app.households.router import router as households_router
+from app.profiles.router import router as profile_router
+from app.targets.router import router as targets_router
 
 app = FastAPI(title="healthMonitor API")
 
@@ -19,6 +22,9 @@ app.add_middleware(
 app.include_router(auth_router)
 app.include_router(households_router)
 app.include_router(foods_router)
+app.include_router(profile_router)
+app.include_router(targets_router)
+app.include_router(diary_router)
 
 
 @app.get("/health")
