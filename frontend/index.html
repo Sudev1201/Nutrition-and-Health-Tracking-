@@ -2,8 +2,28 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link rel="icon" type="image/png" href="/icon-192.png" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+
+    <!--
+      viewport-fit=cover lets the page extend under the notch and home indicator,
+      which is what makes env(safe-area-inset-*) return real values. Without it
+      the bottom tab bar sits above an unusable white strip on an iPhone.
+    -->
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0, viewport-fit=cover"
+    />
+
+    <!-- Tints the browser and task-switcher chrome to match the app. -->
+    <meta name="theme-color" media="(prefers-color-scheme: light)" content="#ffffff" />
+    <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#0b1220" />
+
+    <meta
+      name="description"
+      content="Track macros and micronutrients on a South Indian diet, against ICMR-NIN targets."
+    />
+
     <title>Nutrient Tracker</title>
   </head>
   <body>
