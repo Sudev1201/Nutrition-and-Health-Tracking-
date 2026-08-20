@@ -143,6 +143,80 @@ def test_saving_again_replaces_the_lists_rather_than_appending(signed_in, refere
     assert [item["label"] for item in saved["favourites"]] == ["Milk"]
 
 
+# --- observances survive a round trip ---------------------------------------
+#
+# `PUT /profile` replaces the whole questionnaire rather than merging, which is
+# what makes an unticked condition genuinely go away. The cost of that choice is
+# that anything the GET does not return is destroyed by the next save: a client
+# reads the profile, edits one section, sends it back, and every field missing
+# from the response is now gone. `observances` was exactly that hole.
+
+
+WEDNESDAY = {
+    "kind": "weekday",
+    "weekday": 3,
+    "start_date": None,
+    "end_date": None,
+    "label": "No meat on Wednesdays",
+}
+
+PURATTASI = {
+    "kind": "date_range",
+    "weekday": None,
+    "start_date": "2026-09-18",
+    "end_date": "2026-10-17",
+    "label": "Purattasi",
+}
+
+
+def test_observances_are_returned_by_the_profile(signed_in, reference_data):
+    signed_in.put("/profile", json=profile_with(observances=[WEDNESDAY]))
+
+    saved = signed_in.get("/profile").json()
+    assert saved["observances"] == [WEDNESDAY]
+
+
+def test_all_three_observance_shapes_survive(signed_in, reference_data):
+    """The model deliberately covers a weekday, a date range and a single date."""
+    festival = {
+        "kind": "single_date",
+        "weekday": None,
+        "start_date": "2026-11-08",
+        "end_date": None,
+        "label": "Karthigai Deepam",
+    }
+    signed_in.put(
+        "/profile", json=profile_with(observances=[WEDNESDAY, PURATTASI, festival])
+    )
+
+    saved = signed_in.get("/profile").json()
+    assert sorted(item["label"] for item in saved["observances"]) == [
+        "Karthigai Deepam",
+        "No meat on Wednesdays",
+        "Purattasi",
+    ]
+
+
+def test_reading_a_profile_and_saving_it_back_keeps_the_observances(signed_in, reference_data):
+    """The round trip a profile screen actually performs.
+
+    This is the regression that matters: before `observances` was added to
+    `ProfileOut`, this test wiped a saved vegetarian-day rule without any error,
+    because the client could not send back a field it was never given.
+    """
+    signed_in.put("/profile", json=profile_with(observances=[WEDNESDAY, PURATTASI]))
+
+    read_back = signed_in.get("/profile").json()
+    signed_in.put("/profile", json={**read_back, "weight_kg": 66.0})
+
+    saved = signed_in.get("/profile").json()
+    assert sorted(item["label"] for item in saved["observances"]) == [
+        "No meat on Wednesdays",
+        "Purattasi",
+    ]
+    assert saved["weight_kg"] == 66.0
+
+
 # --- the usual-intake baseline ----------------------------------------------
 
 

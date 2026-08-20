@@ -114,6 +114,14 @@ class UsualIntakeOut(BaseModel):
     grams: float
 
 
+class ObservanceOut(BaseModel):
+    kind: str
+    weekday: int | None
+    start_date: datetime.date | None
+    end_date: datetime.date | None
+    label: str
+
+
 class ProfileOut(BaseModel):
     sex: str
     age: int
@@ -126,6 +134,10 @@ class ProfileOut(BaseModel):
     conditions: list[str]
     medications: list[MedicationOut]
     meal_times: list[MealTimeOut]
+    # A save replaces the whole questionnaire rather than merging, so every field
+    # the GET omits is destroyed by the client's next PUT. Anything accepted by
+    # ProfileIn has to be returned here or it cannot survive an edit.
+    observances: list[ObservanceOut]
     avoided: list[FoodRefOut]
     favourites: list[FoodRefOut]
     usual_intake: list[UsualIntakeOut]
@@ -173,6 +185,16 @@ def _to_out(db: Session, user: User) -> ProfileOut:
                 reminder_on=item.reminder_on,
             )
             for item in service.get_meal_times(db, user)
+        ],
+        observances=[
+            ObservanceOut(
+                kind=item.kind,
+                weekday=item.weekday,
+                start_date=item.start_date,
+                end_date=item.end_date,
+                label=item.label,
+            )
+            for item in service.get_observances(db, user)
         ],
         avoided=[
             FoodRefOut(label=item.label, food_id=item.food_id, food_kind=item.food_kind)

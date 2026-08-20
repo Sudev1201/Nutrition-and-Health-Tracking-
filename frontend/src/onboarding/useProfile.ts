@@ -2,7 +2,12 @@ import { useQuery } from '@tanstack/react-query'
 import { ApiError, api } from '../lib/api'
 import { SLOT_ORDER } from '../log/types'
 import type { MealSlot } from '../log/types'
-import type { FoodRefAnswer, OnboardingAnswers, UsualIntakeAnswer } from './types'
+import type {
+  FoodRefAnswer,
+  ObservanceRule,
+  OnboardingAnswers,
+  UsualIntakeAnswer,
+} from './types'
 import { DEFAULT_MEAL_TIMES, emptyAnswers } from './validation'
 
 /** `GET /profile` — the saved answers, or null when onboarding is not done. */
@@ -18,6 +23,7 @@ export interface SavedProfile {
   conditions: OnboardingAnswers['conditions']
   medications: { name: string; time: string }[]
   meal_times: { slot: string; time: string; weekend_time: string | null; reminder_on: boolean }[]
+  observances: ObservanceRule[]
   avoided: FoodRefAnswer[]
   favourites: FoodRefAnswer[]
   usual_intake: UsualIntakeAnswer[]
@@ -62,6 +68,10 @@ export function answersFromProfile(profile: SavedProfile): OnboardingAnswers {
     cereal_dominant: profile.cereal_dominant,
     conditions: profile.conditions,
     medications: profile.medications,
+    // Carried explicitly. Anything omitted here falls back to emptyAnswers()
+    // and is then wiped by the next save, because the PUT replaces rather than
+    // merges -- which is how a saved vegetarian-day rule used to disappear.
+    observances: profile.observances ?? [],
     avoided: profile.avoided,
     favourites: profile.favourites,
     usual_intake: profile.usual_intake,
