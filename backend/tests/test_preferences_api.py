@@ -305,6 +305,80 @@ def test_a_reasonable_day_is_not_flagged(signed_in, reference_data):
     assert baseline["note"] is None
 
 
+# --- the baseline covers every nutrient, not just energy ---------------------
+#
+# The fixture dish carries 150 kcal, 4 g protein and 30 mg calcium per 100 g, so
+# a usual day of three 200 g portions is 600 g: 900 kcal, 24 g protein, 180 mg
+# calcium, and no sodium at all.
+
+
+def nutrient_named(baseline: dict, code: str) -> dict:
+    return next(item for item in baseline["nutrients"] if item["code"] == code)
+
+
+def test_the_baseline_reports_every_nutrient(signed_in, reference_data):
+    signed_in.put("/profile", json=profile_with(usual_intake=usual_day(reference_data)))
+
+    baseline = signed_in.get("/profile/baseline").json()
+
+    codes = {item["code"] for item in baseline["nutrients"]}
+    assert {"energy", "protein", "calcium", "sodium"} <= codes
+
+
+def test_the_baseline_adds_up_a_micronutrient(signed_in, reference_data):
+    signed_in.put("/profile", json=profile_with(usual_intake=usual_day(reference_data)))
+
+    calcium = nutrient_named(signed_in.get("/profile/baseline").json(), "calcium")
+
+    assert calcium["usual"] == pytest.approx(180, abs=1)
+    assert calcium["rda"] == pytest.approx(1000, abs=1)
+
+
+def test_a_micronutrient_short_of_its_rda_is_flagged(signed_in, reference_data):
+    """180 mg of calcium against a 1,000 mg target is the gap worth showing."""
+    signed_in.put("/profile", json=profile_with(usual_intake=usual_day(reference_data)))
+
+    calcium = nutrient_named(signed_in.get("/profile/baseline").json(), "calcium")
+
+    assert calcium["off_target"] is True
+
+
+def test_a_ceiling_nutrient_under_its_limit_is_not_flagged(signed_in, reference_data):
+    """The asymmetry that a naive `usual - rda` would get backwards.
+
+    Sodium is a ceiling, not a target. A usual day well under it is good news,
+    and reporting it as a shortfall would tell the user to eat more salt.
+    """
+    signed_in.put("/profile", json=profile_with(usual_intake=usual_day(reference_data)))
+
+    sodium = nutrient_named(signed_in.get("/profile/baseline").json(), "sodium")
+
+    assert sodium["kind"] == "ceiling"
+    assert sodium["usual"] == pytest.approx(0, abs=0.01)
+    assert sodium["off_target"] is False
+
+
+def test_a_baseline_nutrient_carries_its_unit_and_display_name(signed_in, reference_data):
+    """Matching the `targets/today` convention: each row is self-describing."""
+    signed_in.put("/profile", json=profile_with(usual_intake=usual_day(reference_data)))
+
+    calcium = nutrient_named(signed_in.get("/profile/baseline").json(), "calcium")
+
+    assert calcium["display_name"] == "Calcium"
+    assert calcium["unit"] == "mg"
+    assert calcium["category"] == "mineral"
+
+
+def test_no_usual_day_means_no_nutrient_rows(signed_in, reference_data):
+    """Empty, not zeroed -- the same reasoning as `usual_energy_kcal` being null."""
+    signed_in.put("/profile", json=profile_with(usual_intake=[]))
+
+    baseline = signed_in.get("/profile/baseline").json()
+
+    assert baseline["has_usual_intake"] is False
+    assert baseline["nutrients"] == []
+
+
 def test_no_usual_day_means_no_baseline_rather_than_zero(signed_in, reference_data):
     """Zero would read as "you eat nothing", which is a very different claim from
     "you have not told us yet"."""

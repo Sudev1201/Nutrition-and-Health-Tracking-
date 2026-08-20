@@ -28,6 +28,30 @@ IMPLAUSIBLE_SHARE = 0.4
 
 
 @dataclass(frozen=True)
+class NutrientBaseline:
+    """One nutrient's usual-day figure against its published target.
+
+    Self-describing, matching the `targets/today` convention, so a client does
+    not need a second lookup to render a row.
+    """
+
+    code: str
+    display_name: str
+    unit: str
+    category: str
+    kind: str  # target | ceiling
+    ear: float | None
+    rda: float
+    tul: float | None
+    usual: float
+    # True when a usual day misses the mark, in whichever direction is wrong for
+    # this nutrient: short of the figure for a target, over it for a ceiling.
+    # Collapsing the two into one `usual - rda` sign would tell someone eating
+    # very little salt to eat more of it.
+    off_target: bool
+
+
+@dataclass(frozen=True)
 class Baseline:
     has_usual_intake: bool
     usual_energy_kcal: float | None
@@ -35,6 +59,7 @@ class Baseline:
     difference_kcal: float | None
     implausible: bool
     note: str | None
+    nutrients: list[NutrientBaseline]
 
 
 def nutrients_for_food(
@@ -61,6 +86,10 @@ def total_nutrients(db: Session, items: list[tuple[uuid.UUID, str, float]]) -> d
     return totals
 
 
+def _off_target(kind: str, usual: float, rda: float) -> bool:
+    return usual > rda if kind == "ceiling" else usual < rda
+
+
 def compute(db: Session, user: User, target_date) -> Baseline | None:
     profile = profiles.get_profile(db, user)
     if profile is None:
@@ -82,11 +111,15 @@ def compute(db: Session, user: User, target_date) -> Baseline | None:
             difference_kcal=None,
             implausible=False,
             note=None,
+            # Empty rather than zeroed, for the same reason
+            # `usual_energy_kcal` is null here.
+            nutrients=[],
         )
 
-    usual = total_nutrients(
+    totals = total_nutrients(
         db, [(item.food_id, item.food_kind, item.grams) for item in items]
-    ).get("energy", 0.0)
+    )
+    usual = totals.get("energy", 0.0)
 
     difference = usual - target_energy
     implausible = target_energy > 0 and abs(difference) / target_energy > IMPLAUSIBLE_SHARE
@@ -101,6 +134,22 @@ def compute(db: Session, user: User, target_date) -> Baseline | None:
             "size — worth a second look before you start."
         )
 
+    nutrients = [
+        NutrientBaseline(
+            code=row.code,
+            display_name=row.display_name,
+            unit=row.unit,
+            category=row.category,
+            kind=row.kind,
+            ear=row.ear,
+            rda=row.rda,
+            tul=row.tul,
+            usual=totals.get(row.code, 0.0),
+            off_target=_off_target(row.kind, totals.get(row.code, 0.0), row.rda),
+        )
+        for row in (resolved.nutrients if resolved else [])
+    ]
+
     return Baseline(
         has_usual_intake=True,
         usual_energy_kcal=usual,
@@ -108,4 +157,5 @@ def compute(db: Session, user: User, target_date) -> Baseline | None:
         difference_kcal=difference,
         implausible=implausible,
         note=note,
+        nutrients=nutrients,
     )

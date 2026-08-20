@@ -2,8 +2,28 @@ import { useQuery } from '@tanstack/react-query'
 import { AlertTriangle } from 'lucide-react'
 import { Link } from 'react-router-dom'
 import { api } from '../lib/api'
-import { formatAmount } from '../lib/format'
+import { formatAmount, unitLabel } from '../lib/format'
+import type { NutrientUnit } from '../lib/format'
 import { Card, CardTitle } from '../ui/Card'
+
+/** One nutrient's usual-day figure against its published RDA. */
+interface NutrientBaseline {
+  code: string
+  display_name: string
+  unit: NutrientUnit
+  category: string
+  kind: 'target' | 'ceiling'
+  ear: number | null
+  rda: number
+  tul: number | null
+  usual: number
+  /**
+   * Whether a usual day misses the mark, in whichever direction is wrong for
+   * this nutrient. The backend decides it, because that is where the
+   * target-versus-ceiling meaning of `kind` lives.
+   */
+  off_target: boolean
+}
 
 /** `GET /profile/baseline` — what a usual day adds up to, against the target. */
 interface Baseline {
@@ -13,6 +33,7 @@ interface Baseline {
   difference_kcal: number | null
   implausible: boolean
   note: string | null
+  nutrients: NutrientBaseline[]
 }
 
 function useBaseline(date: string) {
@@ -21,6 +42,43 @@ function useBaseline(date: string) {
     queryFn: () => api.get<Baseline>(`/profile/baseline?date=${date}`),
     retry: false,
   })
+}
+
+/**
+ * The nutrients a usual day gets wrong, in either direction.
+ *
+ * Energy is excluded because the sentence above already covers it in prose, and
+ * repeating it here reads as two different findings about the same number.
+ */
+function NutrientGaps({ nutrients }: { nutrients: NutrientBaseline[] }) {
+  const gaps = nutrients.filter((item) => item.off_target && item.code !== 'energy')
+
+  if (gaps.length === 0) return null
+
+  return (
+    <div className="mt-3 border-t border-border pt-3">
+      <p className="text-xs font-medium text-text-muted">How a usual day compares</p>
+      <ul className="mt-1.5 space-y-1">
+        {gaps.map((item) => (
+          <li key={item.code} className="flex items-baseline justify-between gap-3 text-sm">
+            <span className="min-w-0 flex-1 truncate">{item.display_name}</span>
+            <span className="shrink-0 text-text-muted">
+              {formatAmount(item.usual, item.unit)} / {formatAmount(item.rda, item.unit)}{' '}
+              {unitLabel(item.unit)}
+            </span>
+            {/*
+              A ceiling nutrient over its figure is too much, not too little.
+              Labelling both "short" would tell someone eating a lot of salt to
+              eat more of it.
+            */}
+            <span className="w-16 shrink-0 text-right text-xs text-text-muted">
+              {item.kind === 'ceiling' ? 'too much' : 'too little'}
+            </span>
+          </li>
+        ))}
+      </ul>
+    </div>
+  )
 }
 
 /**
@@ -70,6 +128,8 @@ export function BaselineNote({ date }: { date: string }) {
         </strong>
         .
       </p>
+
+      <NutrientGaps nutrients={data.nutrients ?? []} />
 
       {data.note !== null && (
         <p className="mt-2 flex gap-2 rounded-card border border-over/40 bg-over/5 p-2 text-xs text-over">

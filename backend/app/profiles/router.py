@@ -244,6 +244,19 @@ def save_profile(
     return _to_out(db, user)
 
 
+class NutrientBaselineOut(BaseModel):
+    code: str
+    display_name: str
+    unit: str
+    category: str
+    kind: str
+    ear: float | None
+    rda: float
+    tul: float | None
+    usual: float
+    off_target: bool
+
+
 class BaselineOut(BaseModel):
     has_usual_intake: bool
     usual_energy_kcal: float | None
@@ -251,6 +264,7 @@ class BaselineOut(BaseModel):
     difference_kcal: float | None
     implausible: bool
     note: str | None
+    nutrients: list[NutrientBaselineOut]
 
 
 @router.get("/baseline", response_model=BaselineOut)
@@ -265,4 +279,7 @@ def read_baseline(
     result = baseline_service.compute(db, user, date or _today_for(user))
     if result is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Complete your profile first")
-    return BaselineOut(**vars(result))
+    return BaselineOut(
+        **{key: value for key, value in vars(result).items() if key != "nutrients"},
+        nutrients=[NutrientBaselineOut(**vars(row)) for row in result.nutrients],
+    )
