@@ -1,0 +1,115 @@
+import type { WeeklyReport } from '../../report/types'
+
+/**
+ * A week that went partly wrong, which is the only kind worth designing for:
+ * calcium never recovered and the carry expired, protein was short on three days
+ * with nothing carried forward by design, sodium ran over, and a fifth of the
+ * week's energy came from estimated restaurant portions.
+ */
+export const REPORT_FIXTURE: WeeklyReport = {
+  start_date: '2026-08-16',
+  end_date: '2026-08-22',
+  slots_logged: 29,
+  slots_total: 35,
+  measured_kcal: 11_240,
+  estimated_kcal: 2_980,
+  days: [
+    { date: '2026-08-16', weekday: 'Sun', energy_kcal: 2240, target_kcal: 2110 },
+    { date: '2026-08-17', weekday: 'Mon', energy_kcal: 1420, target_kcal: 2110 },
+    { date: '2026-08-18', weekday: 'Tue', energy_kcal: 2080, target_kcal: 2110 },
+    { date: '2026-08-19', weekday: 'Wed', energy_kcal: 1960, target_kcal: 2110 },
+    { date: '2026-08-20', weekday: 'Thu', energy_kcal: 2310, target_kcal: 2110 },
+    { date: '2026-08-21', weekday: 'Fri', energy_kcal: 1870, target_kcal: 2110 },
+    { date: '2026-08-22', weekday: 'Sat', energy_kcal: 2340, target_kcal: 2110 },
+  ],
+  nutrients: [
+    {
+      code: 'protein',
+      display_name: 'Protein',
+      unit: 'g',
+      kind: 'target',
+      ear: 43,
+      tul: null,
+      target_total: 378,
+      consumed_total: 321,
+      days_met: 4,
+    },
+    {
+      code: 'fibre',
+      display_name: 'Fibre',
+      unit: 'g',
+      kind: 'target',
+      ear: null,
+      tul: null,
+      target_total: 224,
+      consumed_total: 186,
+      days_met: 3,
+    },
+    {
+      code: 'calcium',
+      display_name: 'Calcium',
+      unit: 'mg',
+      kind: 'target',
+      ear: 800,
+      tul: 2500,
+      target_total: 7000,
+      consumed_total: 4180,
+      days_met: 1,
+    },
+    {
+      code: 'iron',
+      display_name: 'Iron',
+      unit: 'mg',
+      kind: 'target',
+      ear: 13,
+      tul: 45,
+      target_total: 133,
+      consumed_total: 118,
+      days_met: 4,
+    },
+    {
+      code: 'sodium',
+      display_name: 'Sodium',
+      unit: 'mg',
+      kind: 'ceiling',
+      ear: null,
+      tul: 2000,
+      target_total: 14_000,
+      consumed_total: 16_420,
+      days_met: 2,
+    },
+    {
+      code: 'vitamin_b12',
+      display_name: 'Vitamin B12',
+      unit: 'ug',
+      kind: 'target',
+      ear: 2,
+      tul: null,
+      target_total: 15.4,
+      consumed_total: 21.8,
+      days_met: 6,
+    },
+  ],
+  uncompensated: [
+    {
+      code: 'calcium',
+      display_name: 'Calcium',
+      unit: 'mg',
+      amount: 1240,
+      reason: 'carrying the whole shortfall would have raised a day past the 30% cap',
+    },
+    {
+      code: 'protein',
+      display_name: 'Protein',
+      unit: 'g',
+      amount: 57,
+      reason: 'protein never carries forward — there is no storage pool to draw on',
+    },
+  ],
+  suggestions: [
+    'Ragi in place of rice at one meal — 364 mg calcium per 100 g, and the highest-retention vehicle you have.',
+    'Add curd or milk to two more slots; dairy calcium absorbs at 28–32% against about 5% from high-oxalate greens.',
+    'Swap one appalam or pickle serving for a fresh poriyal to bring sodium back under the ceiling.',
+    'Keep coffee and tea an hour away from the iron-rich meals — one cup with a rice meal cuts iron absorption by about half.',
+  ],
+}
