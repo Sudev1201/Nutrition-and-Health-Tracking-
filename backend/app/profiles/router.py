@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 
 from app.auth.deps import get_current_user
 from app.db import get_db
+from app.meal_slots import OPTIONAL_SLOTS, SLOTS
 from app.models.profile import AvoidedFood, FavouriteIngredient
 from app.models.user import User
 from app.profiles import baseline as baseline_service
@@ -15,7 +16,6 @@ from app.profiles import service
 
 router = APIRouter(prefix="/profile", tags=["profile"])
 
-SLOTS = ("breakfast", "snack1", "lunch", "snack2", "dinner")
 
 
 class MedicationIn(BaseModel):
@@ -30,6 +30,9 @@ class MealTimeIn(BaseModel):
     time: str = Field(pattern=r"^\d{2}:\d{2}$")
     weekend_time: str | None = Field(default=None, pattern=r"^\d{2}:\d{2}$")
     reminder_on: bool = True
+    # Defaults to on, so a client that predates the field still describes a
+    # five-meal day rather than silently switching every slot off.
+    is_enabled: bool = True
 
 
 class FoodRefIn(BaseModel):
@@ -98,6 +101,7 @@ class MealTimeOut(BaseModel):
     time: str
     weekend_time: str | None
     reminder_on: bool
+    is_enabled: bool
 
 
 class FoodRefOut(BaseModel):
@@ -183,6 +187,7 @@ def _to_out(db: Session, user: User) -> ProfileOut:
                 time=_hhmm(item.usual_time),
                 weekend_time=_hhmm(item.weekend_time) if item.weekend_time else None,
                 reminder_on=item.reminder_on,
+                is_enabled=item.is_enabled,
             )
             for item in service.get_meal_times(db, user)
         ],
@@ -238,6 +243,21 @@ def save_profile(
     bad_slots = [item.slot for item in payload.meal_times if item.slot not in SLOTS]
     if bad_slots:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, f"Unknown slots: {bad_slots}")
+
+    # Four or five meals a day means one or two snacks. A day without lunch is a
+    # skipped lunch, not a meal-count preference -- and allowing a main meal to
+    # be switched off would make an unlogged one impossible to notice.
+    disabled_mains = [
+        item.slot
+        for item in payload.meal_times
+        if not item.is_enabled and item.slot not in OPTIONAL_SLOTS
+    ]
+    if disabled_mains:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
+            f"These meals cannot be switched off: {disabled_mains}. "
+            "Skip them for a day instead.",
+        )
 
     service.save_profile(db, user, payload)
     db.commit()

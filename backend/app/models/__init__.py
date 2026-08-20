@@ -7,7 +7,7 @@ otherwise `create_all`/`drop_all` and autogenerate silently miss tables.
 """
 
 from app.models.base import Base
-from app.models.diary import MealLog
+from app.models.diary import MealLog, MealSlotSkip
 from app.models.food import (
     Dish,
     DishIngredient,
@@ -45,6 +45,7 @@ __all__ = [
     "Ingredient",
     "IngredientNutrient",
     "MealLog",
+    "MealSlotSkip",
     "MealSlotTime",
     "Medication",
     "Nutrient",

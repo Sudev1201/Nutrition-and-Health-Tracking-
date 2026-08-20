@@ -109,7 +109,10 @@ test('shows all five meal slots', async () => {
 test('distinguishes a skipped slot from one still to be logged', async () => {
   renderScreen()
 
-  expect(await screen.findByText('Skipped')).toBeInTheDocument()
+  // The copy is per slot rather than a blanket note about the optional snack,
+  // since any of the five can be skipped -- so this matches the phrase, not the
+  // whole sentence.
+  expect(await screen.findByText(/^Skipped —/)).toBeInTheDocument()
 })
 
 // Restaurant portions are guesses, and the weekly report separates them from

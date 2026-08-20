@@ -292,6 +292,203 @@ def test_a_day_with_nothing_logged_creates_no_carry(signed_in, reference_data):
     assert calcium["carried_in"] == 0
 
 
+# --- skipping a meal on one day ----------------------------------------------
+#
+# `skipped` is not `empty`. Empty means the app does not know what happened;
+# skipped means the user said nothing was eaten -- no time, or a fast. The
+# frontend has rendered a third state from the start and could never receive one.
+
+
+def skip(client, slot, date=TODAY):
+    return client.post("/diary/skips", json={"date": str(date), "slot": slot})
+
+
+def slot_named(diary: dict, slot: str) -> dict:
+    return next(item for item in diary["slots"] if item["slot"] == slot)
+
+
+def test_a_skipped_slot_reads_as_skipped_not_empty(signed_in, reference_data):
+    signed_in.put("/profile", json=PROFILE)
+
+    assert skip(signed_in, "snack1").status_code == 201
+
+    diary = signed_in.get(f"/diary?date={TODAY}").json()
+    assert slot_named(diary, "snack1")["state"] == "skipped"
+    assert slot_named(diary, "lunch")["state"] == "empty"
+
+
+def test_any_slot_can_be_skipped(signed_in, reference_data):
+    """Not just the optional snacks. Someone fasting skips lunch and dinner too."""
+    signed_in.put("/profile", json=PROFILE)
+
+    for slot in ("breakfast", "lunch", "dinner"):
+        assert skip(signed_in, slot).status_code == 201
+
+    diary = signed_in.get(f"/diary?date={TODAY}").json()
+    assert [slot_named(diary, s)["state"] for s in ("breakfast", "lunch", "dinner")] == [
+        "skipped", "skipped", "skipped",
+    ]
+
+
+def test_skipping_the_same_slot_twice_is_not_an_error(signed_in, reference_data):
+    """A double tap on Skip should be idempotent, not a duplicate row or a 500."""
+    signed_in.put("/profile", json=PROFILE)
+
+    skip(signed_in, "snack1")
+    assert skip(signed_in, "snack1").status_code in (200, 201)
+
+    diary = signed_in.get(f"/diary?date={TODAY}").json()
+    assert slot_named(diary, "snack1")["state"] == "skipped"
+
+
+def test_a_skip_can_be_undone(signed_in, reference_data):
+    signed_in.put("/profile", json=PROFILE)
+    skip(signed_in, "snack1")
+
+    undone = signed_in.request(
+        "DELETE", "/diary/skips", json={"date": str(TODAY), "slot": "snack1"}
+    )
+    assert undone.status_code == 204
+
+    diary = signed_in.get(f"/diary?date={TODAY}").json()
+    assert slot_named(diary, "snack1")["state"] == "empty"
+
+
+def test_a_skip_belongs_to_one_day_only(signed_in, reference_data):
+    signed_in.put("/profile", json=PROFILE)
+    skip(signed_in, "snack1", date=YESTERDAY)
+
+    diary = signed_in.get(f"/diary?date={TODAY}").json()
+    assert slot_named(diary, "snack1")["state"] == "empty"
+
+
+def test_logging_into_a_skipped_slot_makes_it_logged(signed_in, reference_data):
+    """Food wins. Having eaten is a stronger fact than having said you would not."""
+    signed_in.put("/profile", json=PROFILE)
+    skip(signed_in, "lunch")
+
+    signed_in.post(
+        "/diary/entries",
+        json={
+            "date": str(TODAY),
+            "slot": "lunch",
+            "food_id": str(reference_data.id),
+            "food_kind": "dish",
+            "grams": 200,
+            "is_estimated": False,
+        },
+    )
+
+    diary = signed_in.get(f"/diary?date={TODAY}").json()
+    assert slot_named(diary, "lunch")["state"] == "logged"
+
+
+def test_an_unknown_slot_cannot_be_skipped(signed_in, reference_data):
+    signed_in.put("/profile", json=PROFILE)
+
+    assert skip(signed_in, "brunch").status_code == 422
+
+
+def test_a_day_of_only_skips_still_creates_no_carry(signed_in, reference_data):
+    """A fast is not a debt to repay.
+
+    Skips live outside `meal_logs` precisely so the day totals stay empty, which
+    is what the targets service reads as "untracked". Generating a full day's
+    shortfall here would push someone to overeat for the two days after a fast.
+    """
+    signed_in.put("/profile", json=PROFILE)
+    for slot in ("breakfast", "snack1", "lunch", "snack2", "dinner"):
+        skip(signed_in, slot, date=YESTERDAY)
+
+    calcium = nutrient(signed_in.get(f"/targets/today?date={TODAY}").json(), "calcium")
+
+    assert calcium["carried_in"] == 0
+
+
+def test_skipping_requires_sign_in(api_client):
+    assert api_client.post(
+        "/diary/skips", json={"date": str(TODAY), "slot": "snack1"}
+    ).status_code == 401
+
+
+# --- four meals a day rather than five ---------------------------------------
+#
+# A standing preference about the shape of a normal day, which is a different
+# statement from skipping a meal on one particular date.
+
+
+def meal_times_with(**disabled) -> list[dict]:
+    return [
+        {**item, "is_enabled": not disabled.get(item["slot"], False)}
+        for item in PROFILE["meal_times"]
+    ]
+
+
+def test_meal_slots_are_all_enabled_by_default(signed_in, reference_data):
+    signed_in.put("/profile", json=PROFILE)
+
+    saved = signed_in.get("/profile").json()
+    assert all(item["is_enabled"] for item in saved["meal_times"])
+
+
+def test_a_disabled_snack_is_left_out_of_the_diary(signed_in, reference_data):
+    signed_in.put("/profile", json={**PROFILE, "meal_times": meal_times_with(snack1=True)})
+
+    diary = signed_in.get(f"/diary?date={TODAY}").json()
+
+    assert [slot["slot"] for slot in diary["slots"]] == [
+        "breakfast", "lunch", "snack2", "dinner",
+    ]
+
+
+def test_disabling_a_snack_does_not_hide_a_past_day_that_used_it(signed_in, reference_data):
+    """Turning a snack off changes the shape of a normal day from now on. It is
+    not a claim about what was eaten last week, and hiding a real entry would be
+    rewriting history."""
+    signed_in.put("/profile", json=PROFILE)
+    signed_in.post(
+        "/diary/entries",
+        json={
+            "date": str(YESTERDAY),
+            "slot": "snack1",
+            "food_id": str(reference_data.id),
+            "food_kind": "dish",
+            "grams": 200,
+            "is_estimated": False,
+        },
+    )
+
+    signed_in.put("/profile", json={**PROFILE, "meal_times": meal_times_with(snack1=True)})
+
+    yesterday = signed_in.get(f"/diary?date={YESTERDAY}").json()
+    assert slot_named(yesterday, "snack1")["state"] == "logged"
+
+    today = signed_in.get(f"/diary?date={TODAY}").json()
+    assert "snack1" not in [slot["slot"] for slot in today["slots"]]
+
+
+def test_a_main_meal_cannot_be_disabled(signed_in, reference_data):
+    """Four or five meals means one or two snacks. A day without lunch is a
+    skipped lunch, not a meal-count preference -- and letting a main meal be
+    switched off would make an unlogged one impossible to notice."""
+    response = signed_in.put(
+        "/profile", json={**PROFILE, "meal_times": meal_times_with(lunch=True)}
+    )
+
+    assert response.status_code == 422
+
+
+def test_a_disabled_snack_survives_a_profile_round_trip(signed_in, reference_data):
+    signed_in.put("/profile", json={**PROFILE, "meal_times": meal_times_with(snack1=True)})
+
+    read_back = signed_in.get("/profile").json()
+    signed_in.put("/profile", json={**read_back, "weight_kg": 66.0})
+
+    saved = signed_in.get("/profile").json()
+    snack1 = next(item for item in saved["meal_times"] if item["slot"] == "snack1")
+    assert snack1["is_enabled"] is False
+
+
 def test_the_tracking_endpoints_require_sign_in(api_client):
     assert api_client.get("/profile").status_code == 401
     assert api_client.get(f"/targets/today?date={TODAY}").status_code == 401

@@ -1,7 +1,7 @@
 import datetime
 import uuid
 
-from sqlalchemy import Boolean, Date, Float, ForeignKey, String
+from sqlalchemy import Boolean, Date, Float, ForeignKey, String, UniqueConstraint
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -54,3 +54,30 @@ class MealLog(TimestampedBase):
     # Restaurant and eyeballed portions. The weekly report separates these from
     # measured intake so a week eaten out is not shown with false precision.
     is_estimated: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+
+
+class MealSlotSkip(TimestampedBase):
+    """A slot the user said they did not eat, on one particular day.
+
+    Deliberately its own table rather than a foodless `meal_logs` row. The diary's
+    day totals use an empty dict to mean "nothing logged at all", and the targets
+    service relies on that to treat an unused day as untracked rather than as a
+    day of eating nothing. A skip row living in `meal_logs` would make that dict
+    non-empty and start manufacturing shortfall carries the user never earned.
+
+    A consequence worth stating: a day where every slot is skipped still produces
+    no carry. A fast is not a debt to repay -- generating a full day's shortfall
+    would push someone to overeat for the two days after it.
+    """
+
+    __tablename__ = "meal_slot_skips"
+    __table_args__ = (
+        UniqueConstraint("user_id", "logged_on", "slot", name="uq_skip_user_day_slot"),
+    )
+
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), index=True
+    )
+    # The user's local date, matching `MealLog.logged_on`.
+    logged_on: Mapped[datetime.date] = mapped_column(Date, index=True)
+    slot: Mapped[str] = mapped_column(String(12))

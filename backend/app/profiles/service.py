@@ -116,6 +116,7 @@ def save_profile(db: Session, user: User, payload) -> Profile:
                 usual_time=_as_time(item.time),
                 weekend_time=_as_time(item.weekend_time) if item.weekend_time else None,
                 reminder_on=item.reminder_on,
+                is_enabled=item.is_enabled,
             )
             for item in payload.meal_times
         ]

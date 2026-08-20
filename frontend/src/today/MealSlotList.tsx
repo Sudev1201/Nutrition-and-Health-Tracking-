@@ -5,9 +5,12 @@ import { SLOT_LABELS } from '../log/types'
 import type { Diary, DiarySlotState } from '../log/types'
 import { Badge } from '../ui/Badge'
 import { Card, CardTitle } from '../ui/Card'
+import { useSkipSlot } from './useSkipSlot'
 
-function SlotRow({ slot }: { slot: DiarySlotState }) {
+function SlotRow({ slot, date }: { slot: DiarySlotState; date: string }) {
   const kcal = slot.entries.reduce((total, entry) => total + entry.energy_kcal, 0)
+  const skip = useSkipSlot()
+  const label = SLOT_LABELS[slot.slot].toLowerCase()
 
   return (
     <li className="border-b border-border px-3 py-3 last:border-b-0">
@@ -41,20 +44,46 @@ function SlotRow({ slot }: { slot: DiarySlotState }) {
         </ul>
       )}
 
+      {/*
+        Skipped is deliberately worded per slot rather than as a blanket note
+        about the optional snack. Any of the five can be skipped -- no time to
+        eat, or a fast -- and the old copy claimed every skipped slot was the
+        mid-morning snack.
+      */}
       {slot.state === 'skipped' && (
-        <p className="mt-1 text-sm text-text-muted">
-          <span className="text-text-muted">Skipped</span> — the mid-morning snack is optional.
+        <p className="mt-1 flex flex-wrap items-baseline gap-x-2 text-sm text-text-muted">
+          <span>Skipped — you said you did not eat this.</span>
+          <button
+            type="button"
+            aria-label={`Log it after all: ${label}`}
+            onClick={() => skip.mutate({ date, slot: slot.slot, skipped: false })}
+            disabled={skip.isPending}
+            className="text-accent underline disabled:opacity-50"
+          >
+            Log it after all
+          </button>
         </p>
       )}
 
       {slot.state === 'empty' && (
-        <Link
-          to={`/log?slot=${slot.slot}`}
-          className="mt-1.5 inline-flex min-h-11 items-center gap-1.5 text-sm text-accent"
-        >
-          <Plus className="size-4" aria-hidden="true" />
-          Log {SLOT_LABELS[slot.slot].toLowerCase()}
-        </Link>
+        <div className="flex flex-wrap items-center gap-x-4">
+          <Link
+            to={`/log?slot=${slot.slot}`}
+            className="mt-1.5 inline-flex min-h-11 items-center gap-1.5 text-sm text-accent"
+          >
+            <Plus className="size-4" aria-hidden="true" />
+            Log {label}
+          </Link>
+          <button
+            type="button"
+            aria-label={`Skip ${label}`}
+            onClick={() => skip.mutate({ date, slot: slot.slot, skipped: true })}
+            disabled={skip.isPending}
+            className="mt-1.5 inline-flex min-h-11 items-center text-sm text-text-muted underline disabled:opacity-50"
+          >
+            Skip it
+          </button>
+        </div>
       )}
     </li>
   )
@@ -68,7 +97,7 @@ export function MealSlotList({ diary }: { diary: Diary }) {
       </div>
       <ul>
         {diary.slots.map((slot) => (
-          <SlotRow key={slot.slot} slot={slot} />
+          <SlotRow key={slot.slot} slot={slot} date={diary.date} />
         ))}
       </ul>
     </Card>

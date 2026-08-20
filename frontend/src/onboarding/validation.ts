@@ -39,6 +39,9 @@ export const STEP_TITLES: Record<StepId, string> = {
  * five blank clocks. They are only a starting point — everyone's day differs and
  * a reminder at the wrong hour is worse than none, so they stay editable.
  */
+/** The slots a four-meal day leaves out. Mirrors OPTIONAL_SLOTS on the backend. */
+export const OPTIONAL_SLOTS: readonly MealSlot[] = ['snack1', 'snack2']
+
 export const DEFAULT_MEAL_TIMES: Record<MealSlot, string> = {
   breakfast: '08:00',
   snack1: '11:00',
@@ -66,6 +69,9 @@ export function emptyAnswers(): OnboardingAnswers {
       slot,
       time: DEFAULT_MEAL_TIMES[slot],
       weekend_time: null,
+      // Five meals is the starting shape; someone who eats four turns a snack
+      // off rather than having to switch four of them on.
+      is_enabled: true,
     })),
     usual_intake: [],
   }

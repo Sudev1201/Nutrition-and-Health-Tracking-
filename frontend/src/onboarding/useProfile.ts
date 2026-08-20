@@ -22,7 +22,13 @@ export interface SavedProfile {
   cereal_dominant: boolean
   conditions: OnboardingAnswers['conditions']
   medications: { name: string; time: string }[]
-  meal_times: { slot: string; time: string; weekend_time: string | null; reminder_on: boolean }[]
+  meal_times: {
+    slot: string
+    time: string
+    weekend_time: string | null
+    reminder_on: boolean
+    is_enabled: boolean
+  }[]
   observances: ObservanceRule[]
   avoided: FoodRefAnswer[]
   favourites: FoodRefAnswer[]
@@ -83,6 +89,9 @@ export function answersFromProfile(profile: SavedProfile): OnboardingAnswers {
         // before a slot existed still opens with a usable time.
         time: item?.time ?? DEFAULT_MEAL_TIMES[slot],
         weekend_time: item?.weekend_time ?? null,
+        // Defaults to on for a slot the saved profile has no row for, so a
+        // profile written before this field existed still reads as five meals.
+        is_enabled: item?.is_enabled ?? true,
       }
     }),
   }

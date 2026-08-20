@@ -73,6 +73,12 @@ export interface MealTimeAnswer {
   slot: MealSlot
   time: string
   weekend_time: string | null
+  /**
+   * Whether this slot is part of a normal day. Only the two snacks are ever
+   * switched off — four or five meals means one or two snacks, and a day without
+   * lunch is a skipped lunch rather than a meal-count preference.
+   */
+  is_enabled: boolean
 }
 
 export interface OnboardingAnswers {

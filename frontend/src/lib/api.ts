@@ -34,5 +34,7 @@ export const api = {
   post: <T>(path: string, body: unknown) => request<T>('POST', path, body),
   put: <T>(path: string, body: unknown) => request<T>('PUT', path, body),
   patch: <T>(path: string, body: unknown) => request<T>('PATCH', path, body),
-  del: <T>(path: string) => request<T>('DELETE', path),
+  // Takes an optional body: `DELETE /diary/skips` identifies the skip by date
+  // and slot rather than by an id, because a skip has no id worth exposing.
+  del: <T>(path: string, body?: unknown) => request<T>('DELETE', path, body),
 }

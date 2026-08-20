@@ -13,7 +13,7 @@ import type {
   Pace,
   Sex,
 } from './types'
-import { hasConditionConflict } from './validation'
+import { OPTIONAL_SLOTS, hasConditionConflict } from './validation'
 
 export interface StepProps {
   answers: OnboardingAnswers
@@ -360,6 +360,30 @@ export function MealTimesStep({ answers, update }: StepProps) {
       {answers.meal_times.map((meal, index) => (
         <div key={meal.slot} className="mb-3">
           <p className="mb-1 text-sm font-medium">{SLOT_LABELS[meal.slot]}</p>
+
+          {/*
+            Only the snacks get a switch. Four or five meals a day means one or
+            two snacks; a day without lunch is a skipped lunch, recorded per day
+            on the Today screen rather than as a standing preference here.
+          */}
+          {OPTIONAL_SLOTS.includes(meal.slot) && (
+            <Toggle
+              label={`Include the ${SLOT_LABELS[meal.slot].toLowerCase()}`}
+              description="Turn this off if a normal day for you does not include it."
+              checked={meal.is_enabled}
+              onChange={(checked) =>
+                update({
+                  meal_times: answers.meal_times.map((existing, position) =>
+                    position === index ? { ...existing, is_enabled: checked } : existing,
+                  ),
+                })
+              }
+            />
+          )}
+
+          {/* A slot that is not part of the day has no time worth asking for. */}
+          {meal.is_enabled && (
+          <>
           <div className="flex flex-wrap gap-2">
             <input
               type="time"
@@ -391,6 +415,8 @@ export function MealTimesStep({ answers, update }: StepProps) {
             />
           </div>
           <p className="mt-0.5 text-xs text-text-muted">Weekday, then weekend if it differs.</p>
+          </>
+          )}
         </div>
       ))}
     </>

@@ -6,12 +6,10 @@ from sqlalchemy.orm import Session
 
 from app.foods.measures import format_quantity, measures_for_food, resolve_grams
 from app.foods.nutrition import nutrients_for_portion
-from app.models.diary import MealLog
+from app.models.diary import MealLog, MealSlotSkip
 from app.models.food import Dish, Ingredient, IngredientNutrient
 from app.models.nutrient import Nutrient
 from app.models.user import User
-
-SLOTS = ("breakfast", "snack1", "lunch", "snack2", "dinner")
 
 
 class FoodNotFound(LookupError):
@@ -162,6 +160,58 @@ def delete_entry(db: Session, user: User, entry_id: uuid.UUID) -> bool:
     if entry is None or entry.user_id != user.id:
         return False
     db.delete(entry)
+    return True
+
+
+def skipped_on(db: Session, user: User, on_date: datetime.date) -> set[str]:
+    """The slots the user said they did not eat, on this date.
+
+    Read from its own table, so `consumed_on` below stays untouched -- an empty
+    totals dict still means "nothing logged at all", which is what the targets
+    service reads as an untracked day.
+    """
+    return set(
+        db.scalars(
+            select(MealSlotSkip.slot).where(
+                MealSlotSkip.user_id == user.id, MealSlotSkip.logged_on == on_date
+            )
+        )
+    )
+
+
+def skip_slot(db: Session, user: User, on_date: datetime.date, slot: str) -> bool:
+    """Mark a slot skipped. Returns False when it already was.
+
+    Idempotent rather than an error: the unique constraint would turn a double tap
+    on Skip into a 500, and a second tap plainly means the same thing as the first.
+    """
+    existing = db.scalars(
+        select(MealSlotSkip).where(
+            MealSlotSkip.user_id == user.id,
+            MealSlotSkip.logged_on == on_date,
+            MealSlotSkip.slot == slot,
+        )
+    ).one_or_none()
+    if existing is not None:
+        return False
+
+    db.add(MealSlotSkip(user_id=user.id, logged_on=on_date, slot=slot))
+    return True
+
+
+def unskip_slot(db: Session, user: User, on_date: datetime.date, slot: str) -> bool:
+    """Undo a skip. Returns False when there was nothing to undo."""
+    existing = db.scalars(
+        select(MealSlotSkip).where(
+            MealSlotSkip.user_id == user.id,
+            MealSlotSkip.logged_on == on_date,
+            MealSlotSkip.slot == slot,
+        )
+    ).one_or_none()
+    if existing is None:
+        return False
+
+    db.delete(existing)
     return True
 
 

@@ -83,6 +83,13 @@ class MealSlotTime(TimestampedBase):
     # A Sunday breakfast rarely happens at 8am.
     weekend_time: Mapped[datetime.time | None] = mapped_column(Time, nullable=True)
     reminder_on: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    # Not everyone eats five times. Turning a snack off is a standing preference
+    # about the shape of a normal day, which is a different statement from
+    # skipping a meal on one particular day -- that is `MealSlotSkip` below.
+    #
+    # Only the two snacks are ever disabled. A day without lunch is not a
+    # four-meal pattern, it is a skipped lunch.
+    is_enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
 
 
 class ObservanceRule(TimestampedBase):
