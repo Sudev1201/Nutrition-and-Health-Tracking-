@@ -1,1 +1,107 @@
 @import "tailwindcss";
+
+/*
+ * Design tokens. Light values live here; the dark block below redefines the same
+ * names so no component ever branches on theme -- `bg-surface` is correct in both.
+ *
+ * Status colours are the only colours that carry meaning, and each maps to exactly
+ * one reading of a nutrient against its ICMR-NIN figures (see src/lib/status.ts).
+ * Nothing here is decorative.
+ */
+@theme {
+  --color-surface: #ffffff;
+  --color-surface-alt: #f8fafc;
+  --color-border: #e2e8f0;
+  --color-text: #0f172a;
+  --color-text-muted: #64748b;
+
+  --color-accent: #0f766e;
+  --color-accent-soft: #f0fdfa;
+
+  --color-under: #b45309;
+  --color-on-target: #0f766e;
+  --color-over: #c2410c;
+  --color-above-limit: #b91c1c;
+  --color-carried: #7c3aed;
+
+  --radius-card: 6px;
+  --radius-control: 6px;
+
+  --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
+    "Helvetica Neue", Arial, sans-serif;
+}
+
+/*
+ * Dark mode follows the OS. Guarded on :root so the same declarations would still
+ * apply if an explicit theme toggle is added later.
+ */
+@media (prefers-color-scheme: dark) {
+  :root {
+    --color-surface: #0b1220;
+    --color-surface-alt: #131c2b;
+    --color-border: #1e293b;
+    --color-text: #e8edf5;
+    --color-text-muted: #94a3b8;
+
+    --color-accent: #2dd4bf;
+    --color-accent-soft: #10302e;
+
+    --color-under: #f59e0b;
+    --color-on-target: #2dd4bf;
+    --color-over: #fb923c;
+    --color-above-limit: #f87171;
+    --color-carried: #a78bfa;
+  }
+}
+
+@layer base {
+  html {
+    /* Keeps the layout from shifting when a screen grows past one viewport. */
+    scrollbar-gutter: stable;
+  }
+
+  body {
+    background-color: var(--color-surface-alt);
+    color: var(--color-text);
+    font-family: var(--font-sans);
+    /* Honours the iOS safe areas once the app is installed to the home screen. */
+    -webkit-text-size-adjust: 100%;
+  }
+
+  /*
+   * Every figure in this app sits in a column beside another figure, so digits
+   * must be the same width. Applied globally rather than per component because
+   * forgetting it on one screen is what makes a table look broken.
+   */
+  :root {
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* Visible focus for keyboard users, suppressed for mouse clicks. */
+  :focus-visible {
+    outline: 2px solid var(--color-accent);
+    outline-offset: 2px;
+  }
+
+  /*
+   * iOS Safari zooms the viewport when a focused input's font is under 16px, and
+   * the zoom is not undone on blur -- which strands the user on a magnified page
+   * mid meal-logging. Setting the floor here rather than per input.
+   */
+  input,
+  select,
+  textarea,
+  button {
+    font: inherit;
+    font-size: max(1rem, 16px);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}
