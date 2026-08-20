@@ -48,9 +48,85 @@ jobs:
           node-version: '22'
       - run: npm ci
         working-directory: frontend
-      - run: npx tsc --noEmit
+      # `-b`, not `--noEmit`: the root tsconfig is `files: []` with project
+      # references, so `tsc --noEmit` type-checks an empty program and always passes.
+      - run: npx tsc -b
         working-directory: frontend
       - run: npx vitest run
         working-directory: frontend
       - run: npm run build
         working-directory: frontend
+
+  e2e:
+    # The end-to-end walk goes through the real backend and a real Postgres, so
+    # it needs both. Against mocks it would only assert that the mocks return
+    # what they were told, which is why it is not folded into the frontend job.
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: healthmonitor
+          POSTGRES_PASSWORD: healthmonitor
+          POSTGRES_DB: healthmonitor
+        ports:
+          - 5433:5432
+        options: >-
+          --health-cmd "pg_isready -U healthmonitor"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - run: uv sync
+        working-directory: backend
+      - run: uv run alembic upgrade head
+        working-directory: backend
+
+      # Only the loaders that need no downloads. The full ETL pulls IFCT, INDB
+      # and USDA, which is far too slow and too network-dependent for CI; these
+      # three are enough for targets to compute and for food search to return
+      # something real to log.
+      - run: uv run python -m scripts.e2e_seed
+        working-directory: backend
+
+      # nohup and a redirect, not a bare `&`: the step's shell exits as soon as
+      # the command returns, and the log has to outlive it to be readable when
+      # the API fails to start.
+      - name: Start the API
+        run: nohup uv run uvicorn app.main:app --port 8000 > /tmp/api.log 2>&1 &
+        working-directory: backend
+      - name: Wait for the API
+        run: |
+          for _ in $(seq 1 30); do
+            curl -sf http://localhost:8000/health && exit 0
+            sleep 1
+          done
+          echo "the API did not come up. Its log:" >&2
+          cat /tmp/api.log >&2
+          exit 1
+
+      - run: npm ci
+        working-directory: frontend
+      - run: npx playwright install --with-deps chromium
+        working-directory: frontend
+      - run: npm run test:e2e
+        working-directory: frontend
+
+      - name: The API log, if anything failed
+        if: failure()
+        run: cat /tmp/api.log
+
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: playwright-report
+          path: |
+            frontend/playwright-report/
+            frontend/test-results/
+          retention-days: 7

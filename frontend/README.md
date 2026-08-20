@@ -69,7 +69,8 @@ else decides what colour a number is.
 ## Checks
 
 ```bash
-npx vitest run     # unit and component tests, MSW-backed
+npm test           # unit and component tests, MSW-backed
+npx tsc -b         # typecheck every project reference
 npm run build      # tsc -b, then the production bundle and service worker
 npm run lint       # oxlint
 ```
@@ -77,9 +78,44 @@ npm run lint       # oxlint
 `npm run build` is the authoritative typecheck — `npx tsc --noEmit` alone does not build the
 project references and will miss errors.
 
+### End to end
+
+```bash
+npm run test:e2e   # Playwright: onboarding -> log -> dashboard
+```
+
+Deliberately against the **real** backend and a real Postgres, never against MSW — run against
+mocks it would assert only that the mocks return what they were told, which is why this layer
+was deferred rather than written earlier.
+
+Auth is real too. `backend/scripts/e2e_session.py` signs a genuine session token with the app's
+own code and `e2e/globalSetup.ts` puts it in the browser's cookie jar, so the walk goes through
+the same `get_current_user` path a signed-in person does. Demo auth is explicitly *off*: it
+fakes `/auth/me` in the browser while the backend still has no session, which would leave every
+real endpoint answering 401.
+
+It needs a database and an API, which it does not start for you:
+
+```bash
+docker compose up -d db
+cd backend && uv run alembic upgrade head
+cd backend && uv run python -m scripts.e2e_seed      # offline: nutrients, ICMR rows, 5 foods
+cd backend && uv run uvicorn app.main:app --port 8000
+```
+
+`e2e_seed` runs only the loaders that need no downloads, so the walk works on a database that
+has never run the full ETL. Each spec owns a different meal slot, because `globalSetup` resets
+the test user once per run rather than once per test.
+
+If a local `http_proxy` is set, note that a `no_proxy` list covering `127.0.0.1` but not
+`localhost` will send Playwright's readiness check to the proxy and surface as
+"timed out waiting for webServer". The config adds `localhost` to `no_proxy` and passes
+`--no-proxy-server` to Chromium for that reason.
+
 ### Verified manually, not by tests
 
-- `Sheet`'s focus trap and Esc-to-dismiss. It uses a native `<dialog>`, and jsdom 30 implements
-  none of that element's methods, so `src/setupTests.ts` shims it.
+- `Sheet`'s focus trap. It uses a native `<dialog>`, and jsdom 30 implements none of that
+  element's methods, so `src/setupTests.ts` shims it. Esc-to-dismiss is now covered by the
+  Playwright run against a real browser; the focus trap still is not.
 - The responsive breakpoint itself. jsdom does not evaluate CSS, so both layouts are present in
   the DOM during tests; check the real thing in a browser at 390px and 1440px.

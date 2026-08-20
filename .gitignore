@@ -10,3 +10,8 @@ node_modules/
 dist/
 .DS_Store
 .devlogs/
+
+# Playwright: a real signed session token, and run artefacts.
+frontend/e2e/.auth/
+frontend/test-results/
+frontend/playwright-report/

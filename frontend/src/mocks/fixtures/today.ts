@@ -30,6 +30,7 @@ export const TODAY_FIXTURE: TodayTargets = {
       carried_in: 0,
       carried_from: null,
       consumed: 1420,
+      coverage: 1,
     },
     {
       // No carry, ever: a 12-day trial found no catch-up for insufficient amino
@@ -46,6 +47,7 @@ export const TODAY_FIXTURE: TodayTargets = {
       carried_in: 0,
       carried_from: null,
       consumed: 38,
+      coverage: 1,
     },
     {
       code: 'fibre',
@@ -62,6 +64,7 @@ export const TODAY_FIXTURE: TodayTargets = {
       carried_in: 4,
       carried_from: 'Friday',
       consumed: 21,
+      coverage: 1,
     },
     {
       code: 'calcium',
@@ -76,6 +79,7 @@ export const TODAY_FIXTURE: TodayTargets = {
       carried_in: 180,
       carried_from: 'Friday',
       consumed: 410,
+      coverage: 1,
     },
     {
       code: 'iron',
@@ -90,6 +94,7 @@ export const TODAY_FIXTURE: TodayTargets = {
       carried_in: 0,
       carried_from: null,
       consumed: 12,
+      coverage: 1,
     },
     {
       // A ceiling, not a target. Under it is fine; a "deficit" is meaningless.
@@ -105,6 +110,7 @@ export const TODAY_FIXTURE: TodayTargets = {
       carried_in: 0,
       carried_from: null,
       consumed: 2680,
+      coverage: 1,
     },
     {
       // ICMR set no upper limit for B12, so 340% of the RDA must raise nothing.
@@ -120,6 +126,7 @@ export const TODAY_FIXTURE: TodayTargets = {
       carried_in: 0,
       carried_from: null,
       consumed: 7.5,
+      coverage: 1,
     },
     {
       code: 'vitamin_c',
@@ -134,6 +141,7 @@ export const TODAY_FIXTURE: TodayTargets = {
       carried_in: 0,
       carried_from: null,
       consumed: 96,
+      coverage: 1,
     },
   ],
   warnings: [
