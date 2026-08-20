@@ -112,16 +112,24 @@ rows instead.
 
 ## Known gaps
 
-- **The baseline uses energy only.** `POST /foods/nutrients` returns every
-  nutrient, but the baseline card compares kcal. Showing where a usual day falls
-  short on calcium or protein would be more useful and is a small step from here.
-- **No `skipped` slot state.** The diary returns `logged` or `empty`; the spec's
-  optional mid-morning snack cannot yet be explicitly skipped.
-- **Iodine coverage.** Only 4 of 547 ingredients carry an iodine row, so iodine
-  totals read as complete when they are not — carried over from plan 2 and still
-  outstanding.
+These were the gaps as this plan left them. All but the last two were closed in
+`2026-08-20-plan-5-closeout.md`; see that document for what was done and for the
+gaps that remain.
+
+- ~~**The baseline uses energy only.**~~ Closed: `GET /profile/baseline` now
+  returns a per-nutrient array, compared against each nutrient's published `rda`
+  and respecting the target-versus-ceiling asymmetry.
+- ~~**No `skipped` slot state.**~~ Closed, and wider than described here: any of
+  the five slots can be skipped for a day, and a separate `is_enabled` flag
+  covers eating four times rather than five.
+- **Iodine coverage.** Still 4 of 547 ingredients. What changed is that it no
+  longer reads as complete — a `coverage` figure now says what share of the day
+  a number speaks for, and an unmeasured nutrient no longer generates a
+  shortfall carry. Filling it needs a citable Indian measurement; USDA's dairy
+  and egg figures reflect US practice and this loader already refuses them.
 - **Drug interactions live in code**, not the `drug_interaction_rules` table the
-  spec asks for. Only the interactions the spec verified are encoded.
+  spec asks for. Deferred to phase 2 with the rest of the prescription work.
+  Only the interactions the spec verified are encoded.
 - Weight, cycle, the planner, the weekly report and reminders remain on MSW
   fixtures with their `Demo data` banners.
 
