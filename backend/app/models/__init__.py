@@ -18,6 +18,7 @@ from app.models.food import (
 )
 from app.models.household import Household, HouseholdInvite, HouseholdMember
 from app.models.nutrient import Nutrient
+from app.models.plan import MealPlan, MealPlanItem
 from app.models.profile import (
     AvoidedFood,
     FavouriteIngredient,
@@ -45,6 +46,8 @@ __all__ = [
     "Ingredient",
     "IngredientNutrient",
     "MealLog",
+    "MealPlan",
+    "MealPlanItem",
     "MealSlotSkip",
     "MealSlotTime",
     "Medication",
