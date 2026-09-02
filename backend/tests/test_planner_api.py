@@ -489,6 +489,52 @@ def test_a_locked_dinner_survives_an_off_plan_lunch(signed_in, planner_pool):
     assert kept["locked"] is True
 
 
+def test_a_dish_eaten_off_plan_is_not_suggested_again_that_day(signed_in, planner_pool, db):
+    # Counting what was eaten is not the same as fixing it. Every lunch dish here
+    # is also a dinner dish, so without the exclusion the re-planned dinner is
+    # free to serve the very thing that was just eaten for lunch -- the engine
+    # sees only the nutrients, through `consumed`, never the dish's identity.
+    signed_in.put("/profile", json=NON_VEG_PROFILE)
+    before = week(signed_in)
+    planned_lunch = item_in(before, MONDAY, "lunch")
+    off_plan = next(
+        d for d in planner_pool.values()
+        if str(d.id) != planned_lunch["dish_id"] and "lunch" in d.slot_tags
+    )
+
+    log(signed_in, off_plan, MONDAY, "lunch")
+
+    after = week(signed_in)
+    for slot in ("snack2", "dinner"):
+        item = item_in(after, MONDAY, slot)
+        assert item is not None
+        assert item["dish_id"] != str(off_plan.id)
+
+    # The guarantee rather than the coincidence: on this pool the scorer already
+    # prefers variety, so the assertions above can hold while the eaten dish is
+    # still on offer. What must be true is that the day's context knows it was
+    # eaten, which is what keeps it out of the candidate list altogether.
+    user = _user(db)
+    context = planner.build_context(db, user, profiles.get_profile(db, user), MONDAY)
+    assert off_plan.id in context.eaten
+
+
+def test_logging_into_a_day_that_has_ended_does_not_replan_it(signed_in, planner_pool):
+    # Recording a meal you forgot on Tuesday must not rewrite Tuesday's plan:
+    # the hook follows the same rule as `generate_week`, which never plans a day
+    # that has already ended.
+    signed_in.put("/profile", json=NON_VEG_PROFILE)
+    today = datetime.datetime.now(KOLKATA).date()
+    this_week = planner.week_start_for(today)
+    if this_week >= today:
+        pytest.skip("no past day this week")
+
+    before = week(signed_in, this_week)
+    log(signed_in, planner_pool["test:idli"], this_week, "breakfast")
+
+    assert week(signed_in, this_week) == before
+
+
 # --- the household cooking view -------------------------------------------------------------
 
 

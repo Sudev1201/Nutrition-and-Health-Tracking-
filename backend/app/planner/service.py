@@ -71,6 +71,9 @@ class DayContext:
     disabled: frozenset[str] = frozenset()
     skipped: frozenset[str] = frozenset()
     logged: frozenset[str] = frozenset()
+    # The dishes actually eaten today. `consumed` carries what they contributed;
+    # this carries which they were, which is what stops one being suggested twice.
+    eaten: frozenset[uuid.UUID] = frozenset()
     consumed: dict[str, float] = field(default_factory=dict)
 
 
@@ -281,6 +284,8 @@ def build_context(db: Session, user: User, profile: Profile, day: datetime.date)
             if wait is not None:
                 wait_until[slot] = max(wait, wait_until.get(slot, wait))
 
+    entries = diary.list_entries(db, user, day)
+
     return DayContext(
         date=day,
         rules=DayRules(
@@ -296,7 +301,8 @@ def build_context(db: Session, user: User, profile: Profile, day: datetime.date)
         wait_until=wait_until,
         disabled=frozenset(item.slot for item in meal_times if not item.is_enabled),
         skipped=frozenset(diary.skipped_on(db, user, day)),
-        logged=frozenset(entry.slot for entry in diary.list_entries(db, user, day)),
+        logged=frozenset(entry.slot for entry in entries),
+        eaten=frozenset(e.dish_id for e in entries if e.dish_id is not None),
         consumed=diary.consumed_on(db, user, day),
     )
 
@@ -392,10 +398,21 @@ def _day_input(
     fixed: Sequence[PlannedItem],
     favourites: tuple[FoodRef, ...],
 ) -> DayInput:
+    # A dish already eaten today is not offered again today. The engine only ever
+    # sees what a logged meal contributed, never which dish it was, so dropping it
+    # here is the one place that can keep the afternoon from repeating the lunch.
+    slots = {
+        s: tuple(
+            candidate
+            for candidate in rules.candidates_for_slot(pool, s, context.rules)
+            if candidate.dish_id not in context.eaten
+        )
+        for s in open_slots
+    }
     return DayInput(
         date=context.date,
         goals=context.goals,
-        slots={s: tuple(rules.candidates_for_slot(pool, s, context.rules)) for s in open_slots},
+        slots=slots,
         fixed=tuple(fixed),
         consumed=context.consumed,
         favourites=favourites,
@@ -492,6 +509,10 @@ def replan_after_log(
     """
     plan = get_plan(db, user, week_start_for(day))
     if plan is None:
+        return False
+    # The same rule `generate_week` follows: a day that has already ended is never
+    # planned, so back-dating a forgotten meal must not rewrite what that day held.
+    if day < local_today(user):
         return False
     rows = _items_for(db, plan, day)
     planned = next((row for row in rows if row.slot == slot), None)
