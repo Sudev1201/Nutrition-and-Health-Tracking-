@@ -10,6 +10,10 @@
 
 **Spec:** `docs/superpowers/specs/2026-08-15-south-indian-nutrient-tracker-design.md` — section "3. Meal planner", section "6. Diet observance rules", the medication table under the planner section, and "Solo Use & Households" (cooking view). The HTTP contract is `frontend/src/plan/types.ts` and the fixture `frontend/src/mocks/fixtures/plan.ts`.
 
+**Status:** Complete. 377 backend tests and 197 frontend tests passing, plus 4
+Playwright specs against a live API; `ruff`, `alembic check`, `oxlint`, `tsc -b`
+and `vite build` all clean.
+
 ## Global Constraints
 
 - Python `>=3.12`, `ruff` line length 100, `uv run` for every backend command, run from `backend/`.

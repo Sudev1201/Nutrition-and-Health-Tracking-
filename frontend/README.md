@@ -35,9 +35,10 @@ it hands a session to anyone who asks.
 ## Which screens are real
 
 **Live against the real backend:** sign-in, household, food search, the onboarding
-questionnaire, Today (real ICMR-NIN targets and the compensation ledger) and meal logging.
+questionnaire, Today (real ICMR-NIN targets and the compensation ledger), meal logging, and
+the meal plan (generation, swap, lock, regenerate, and the household cooking view).
 
-**Still on MSW fixtures:** Plan, Report, Weight, Cycle and Reminders. Each carries a
+**Still on MSW fixtures:** Report, Weight, Cycle and Reminders. Each carries a
 **Demo data** banner naming the endpoint it is waiting for. Those handlers and the
 `types.ts` in each feature folder are the proposed contract for the remaining
 backend plans.
@@ -81,7 +82,7 @@ project references and will miss errors.
 ### End to end
 
 ```bash
-npm run test:e2e   # Playwright: onboarding -> log -> dashboard
+npm run test:e2e   # Playwright: onboarding -> log -> dashboard, then the plan
 ```
 
 Deliberately against the **real** backend and a real Postgres, never against MSW — run against

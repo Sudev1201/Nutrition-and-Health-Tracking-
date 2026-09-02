@@ -16,6 +16,7 @@ import { expect, test } from '@playwright/test'
  *    not implement at all — `setupTests.ts` shims them and says outright that
  *    they are verified manually. This is the first automated check of the real
  *    thing.
+ *  - The Plan screen on the real planner, rather than the fixture it shipped with.
  */
 
 const SEARCH_DEBOUNCE_MS = 400
@@ -133,5 +134,28 @@ test.describe('the tracking loop', () => {
 
     await page.keyboard.press('Escape')
     await expect(page.getByRole('dialog')).toBeHidden()
+  })
+
+  test('the plan page shows a Sunday-to-Saturday week from the real planner', async ({
+    page,
+  }) => {
+    // `scripts/e2e_seed.py` seeds no dishes with slot tags, so the plan it
+    // produces is seven days with nothing in them. That is still the thing worth
+    // checking: the screen is no longer on a fixture, the week comes out of
+    // FastAPI Sunday to Saturday, and regenerating round-trips. Dish content
+    // needs the full ETL, which is far too slow for CI.
+    await page.goto('/plan')
+
+    // Days are landmark regions named by weekday; at the default desktop
+    // viewport all seven are visible side by side.
+    await expect(page.getByRole('region', { name: 'Sunday' })).toBeVisible()
+    await expect(page.getByRole('region', { name: 'Saturday' })).toBeVisible()
+
+    // The demo banner is gone for good.
+    await expect(page.getByRole('note')).toHaveCount(0)
+
+    await page.getByRole('button', { name: /regenerate week/i }).click()
+    await expect(page.getByRole('region', { name: 'Sunday' })).toBeVisible()
+    await expect(page.getByRole('alert')).toHaveCount(0)
   })
 })
