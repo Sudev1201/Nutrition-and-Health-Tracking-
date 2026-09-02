@@ -16,15 +16,8 @@ export function CookingView({ date, weekday }: { date: string; weekday: string }
 
   if (!inHousehold) return null
 
-  /*
-   * Named as a landmark region only once the fetch has settled. `household` and
-   * `cooking` are two sequential requests, so this section can mount, mid-fetch,
-   * a render ahead of `cooking`'s data — naming it immediately would let an
-   * assistive-tech query for "Cooking together" land on a still-loading section.
-   * Waiting for `!isPending` keeps the name and its content arriving together.
-   */
   return (
-    <section aria-labelledby={cooking.isPending ? undefined : 'cooking-together'} className="mb-4">
+    <section aria-labelledby="cooking-together" className="mb-4">
       <Card>
         <CardTitle>
           <span id="cooking-together">Cooking together</span>

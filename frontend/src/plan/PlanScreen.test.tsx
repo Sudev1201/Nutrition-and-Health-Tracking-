@@ -177,6 +177,9 @@ test('a household member sees where plans coincide on the selected day', async (
   renderScreen()
 
   const cooking = within(await screen.findByRole('region', { name: /cooking together/i }))
-  expect(cooking.getByText('Idli with sambar')).toBeInTheDocument()
-  expect(cooking.getByText(/Sudev, Amma/)).toBeInTheDocument()
+  // Awaited rather than a synchronous getByText: the region is named as soon as
+  // `household` resolves, one render ahead of `cooking`'s own (sequential) fetch
+  // settling, so its content is not necessarily there on the very first check.
+  expect(await cooking.findByText('Idli with sambar')).toBeInTheDocument()
+  expect(await cooking.findByText(/Sudev, Amma/)).toBeInTheDocument()
 })
