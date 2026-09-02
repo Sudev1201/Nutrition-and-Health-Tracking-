@@ -4,6 +4,10 @@ import type { CookingView, PlanDay, WeekPlan } from '../../plan/types'
  * A Sunday-to-Saturday week with the constraints that make the planner
  * interesting: a recurring Friday vegetarian rule, a locked meal that must
  * survive regeneration, and breakfast pushed clear of the levothyroxine window.
+ *
+ * `/plan/week` and `/plan/cooking` are real endpoints now (plan 6). This fixture
+ * is kept for `PlanScreen.test.tsx`, which stubs them per test: a generated plan
+ * would not reliably produce a locked meal or a rationale to assert against.
  */
 function day(
   date: string,
@@ -94,6 +98,8 @@ export const COOKING_FIXTURE: CookingView = {
   date: '2026-08-17',
   overlaps: [
     { slot: 'breakfast', dish_name: 'Idli with sambar', members: ['Sudev', 'Amma'] },
-    { slot: 'dinner', dish_name: 'Ragi dosa', members: ['Sudev', 'Amma', 'Appa'] },
+    // Ordered so the joined text does not contain "Sudev, Amma" as a substring —
+    // that would collide with the breakfast overlap under a loose text match.
+    { slot: 'dinner', dish_name: 'Ragi dosa', members: ['Amma', 'Sudev', 'Appa'] },
   ],
 }

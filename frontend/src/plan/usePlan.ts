@@ -18,11 +18,12 @@ export function useWeekPlan(start: string) {
   })
 }
 
-export function useCookingView(date: string) {
+export function useCookingView(date: string, enabled = true) {
   return useQuery({
     queryKey: ['plan', 'cooking', date],
     queryFn: () => api.get<CookingView>(`/plan/cooking?date=${date}`),
     retry: false,
+    enabled,
   })
 }
 

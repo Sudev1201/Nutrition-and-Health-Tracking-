@@ -1,12 +1,15 @@
 import { useState } from 'react'
 import { Leaf, Lock, LockOpen, RefreshCw, Shuffle } from 'lucide-react'
+import { Link } from 'react-router-dom'
+import { ApiError } from '../lib/api'
 import { cx } from '../lib/cx'
 import { SLOT_LABELS } from '../log/types'
 import { Badge } from '../ui/Badge'
 import { Button } from '../ui/Button'
 import { CardTitle } from '../ui/Card'
-import { DemoDataBanner, Skeleton } from '../ui/feedback'
+import { EmptyState, Skeleton } from '../ui/feedback'
 import { SegmentedControl } from '../ui/SegmentedControl'
+import { CookingView } from './CookingView'
 import type { PlanDay, PlanItem } from './types'
 import { useRegenerateWeek, useSwapItem, useToggleLock, useWeekPlan, weekStartIso } from './usePlan'
 
@@ -80,11 +83,15 @@ function DayPanel({ day, hiddenOnPhone }: { day: PlanDay; hiddenOnPhone: boolean
           </span>
         )}
       </div>
-      <ul>
-        {day.items.map((item) => (
-          <ItemRow key={item.id} item={item} />
-        ))}
-      </ul>
+      {day.items.length === 0 ? (
+        <p className="px-3 py-3 text-sm text-text-muted">Nothing planned for this day.</p>
+      ) : (
+        <ul>
+          {day.items.map((item) => (
+            <ItemRow key={item.id} item={item} />
+          ))}
+        </ul>
+      )}
     </section>
   )
 }
@@ -96,6 +103,28 @@ export function PlanScreen() {
   const [selectedDate, setSelectedDate] = useState<string | null>(null)
 
   if (plan.isPending) return <Skeleton className="h-96 w-full" />
+
+  /*
+   * A 404 from /plan/week means there is no profile yet: a plan is built from
+   * the daily targets, and there are none to build from. Point at onboarding
+   * rather than reporting an error that did not happen.
+   */
+  if (plan.error instanceof ApiError && plan.error.status === 404) {
+    return (
+      <EmptyState
+        title="Let’s set up your targets"
+        description="A meal plan is built from your daily targets, so there is nothing to plan until you have told us about yourself."
+        action={
+          <Link
+            to="/profile/about"
+            className="inline-flex min-h-11 items-center rounded-control border border-accent bg-accent px-4 text-sm font-medium text-surface"
+          >
+            Set up your profile
+          </Link>
+        }
+      />
+    )
+  }
   if (plan.isError || plan.data === undefined) {
     return (
       <p role="alert" className="text-sm text-above-limit">
@@ -109,8 +138,6 @@ export function PlanScreen() {
 
   return (
     <section>
-      <DemoDataBanner endpoint="GET /plan/week" />
-
       <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
         {/*
           A phone shows one day at a time behind this picker; from `lg` the whole
@@ -143,6 +170,8 @@ export function PlanScreen() {
           Regenerate week
         </Button>
       </div>
+
+      <CookingView date={active.date} weekday={active.weekday} />
 
       <div className="grid gap-3 lg:grid-cols-7">
         {days.map((day) => (
