@@ -89,6 +89,9 @@ class DayInput:
     # Yesterday's totals, for hold_steady. plan_week fills this in from the day
     # before; the caller sets it for the first day of a run.
     previous_day: dict[str, float] | None = None
+    # Dishes already eaten today: not offered again while anything else fits,
+    # released by the too-small-pool fallback below rather than left as a hole.
+    eaten: frozenset[uuid.UUID] = frozenset()
 
 
 def add_totals(*parts: dict[str, float]) -> dict[str, float]:
@@ -254,7 +257,7 @@ def plan_day(
     items: dict[str, PlannedItem] = {}
     for index, slot in enumerate(open_slots):
         placed = add_totals(fixed_totals, *(i.nutrients for i in items.values()))
-        used_today = fixed_dishes | frozenset(i.dish_id for i in items.values())
+        used_today = fixed_dishes | day.eaten | frozenset(i.dish_id for i in items.values())
         chosen = _choose_for_slot(
             day, slot, placed, open_slots[index:], uses, yesterday, rng, exclude=used_today
         )
@@ -275,7 +278,7 @@ def plan_day(
             others = {s: i for s, i in items.items() if s != slot}
             base = add_totals(fixed_totals, *(i.nutrients for i in others.values()))
             current = day_cost(add_totals(base, items[slot].nutrients), day)
-            exclude = fixed_dishes | frozenset(i.dish_id for i in others.values())
+            exclude = fixed_dishes | day.eaten | frozenset(i.dish_id for i in others.values())
             exclude |= {items[slot].dish_id}
             alternative = _choose_for_slot(
                 day, slot, base, [slot], uses, yesterday, rng, exclude=exclude
@@ -341,7 +344,7 @@ def alternative_for(
     caller's own exclusions (at least the dish being swapped away).
     """
     fixed_totals = add_totals(day.consumed, *(item.nutrients for item in day.fixed))
-    used = exclude | frozenset(item.dish_id for item in day.fixed)
+    used = exclude | day.eaten | frozenset(item.dish_id for item in day.fixed)
     chosen = _choose_for_slot(day, slot, fixed_totals, [slot], Counter(), frozenset(), rng, used)
     if chosen is None:
         return None

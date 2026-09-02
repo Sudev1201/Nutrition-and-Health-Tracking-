@@ -398,25 +398,19 @@ def _day_input(
     fixed: Sequence[PlannedItem],
     favourites: tuple[FoodRef, ...],
 ) -> DayInput:
-    # A dish already eaten today is not offered again today. The engine only ever
-    # sees what a logged meal contributed, never which dish it was, so dropping it
-    # here is the one place that can keep the afternoon from repeating the lunch.
-    slots = {
-        s: tuple(
-            candidate
-            for candidate in rules.candidates_for_slot(pool, s, context.rules)
-            if candidate.dish_id not in context.eaten
-        )
-        for s in open_slots
-    }
     return DayInput(
         date=context.date,
         goals=context.goals,
-        slots=slots,
+        slots={s: tuple(rules.candidates_for_slot(pool, s, context.rules)) for s in open_slots},
         fixed=tuple(fixed),
         consumed=context.consumed,
         favourites=favourites,
         hold_steady=context.hold_steady,
+        # What was eaten today, so the engine does not serve it again today. A
+        # soft exclusion, not a filter on the candidates: were it removed here, a
+        # slot whose only candidate had been eaten would silently go unplanned
+        # instead of falling back to it.
+        eaten=context.eaten,
     )
 
 

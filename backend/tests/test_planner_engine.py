@@ -181,6 +181,29 @@ def test_food_already_eaten_shrinks_what_is_planned():
     assert sum(i.nutrients["energy"] for i in fed) < sum(i.nutrients["energy"] for i in hungry)
 
 
+def test_a_dish_already_eaten_today_is_not_offered_while_anything_else_fits():
+    # Dal rice was eaten off-plan at lunch, so the re-planned dinner takes the
+    # other candidate. Counting what a meal contributed is not enough on its own:
+    # the engine has to know which dish it was.
+    items = plan_day(
+        day(slots={"dinner": (DAL_RICE, CURD_RICE)}, eaten=frozenset({DAL_RICE.dish_id})), rng()
+    )
+
+    assert [item.dish_id for item in items] == [CURD_RICE.dish_id]
+
+
+def test_a_slot_whose_only_candidate_was_eaten_is_still_filled():
+    # The same judgement as the repeat fallback: a pool too small to avoid the
+    # dish eaten earlier is better than a hole in the day. This is why "eaten"
+    # is an exclusion the engine can release, not a filter on the candidates --
+    # a slot whose tuple arrived empty would be dropped without a word.
+    items = plan_day(
+        day(slots={"dinner": (DAL_RICE,)}, eaten=frozenset({DAL_RICE.dish_id})), rng()
+    )
+
+    assert [(item.slot, item.dish_id) for item in items] == [("dinner", DAL_RICE.dish_id)]
+
+
 def test_a_locked_item_is_kept_and_its_slot_is_not_planned_again():
     locked = PlannedItem(
         slot="lunch",
