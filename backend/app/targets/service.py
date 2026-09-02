@@ -58,6 +58,10 @@ class DayTargets:
     date: datetime.date
     nutrients: list[NutrientDay]
     warnings: list[Warning]
+    # Nutrients whose day-to-day variation must NOT be smoothed -- vitamin K on
+    # warfarin. The ledger already honours this through `_policies`; the planner
+    # reads it here so "hold steady" is decided in one place.
+    hold_steady: frozenset[str] = frozenset()
 
 
 def age_band(age: int) -> str:
@@ -236,4 +240,9 @@ def resolve_day(db: Session, user: User, target_date: datetime.date) -> DayTarge
             )
         )
 
-    return DayTargets(date=target_date, nutrients=rows, warnings=overlay.warnings)
+    return DayTargets(
+        date=target_date,
+        nutrients=rows,
+        warnings=overlay.warnings,
+        hold_steady=overlay.compensation_disabled,
+    )
