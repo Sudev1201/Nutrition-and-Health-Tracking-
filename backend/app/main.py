@@ -6,6 +6,7 @@ from app.config import settings
 from app.diary.router import router as diary_router
 from app.foods.router import router as foods_router
 from app.households.router import router as households_router
+from app.planner.router import router as planner_router
 from app.profiles.router import router as profile_router
 from app.targets.router import router as targets_router
 
@@ -25,6 +26,7 @@ app.include_router(foods_router)
 app.include_router(profile_router)
 app.include_router(targets_router)
 app.include_router(diary_router)
+app.include_router(planner_router)
 
 
 @app.get("/health")

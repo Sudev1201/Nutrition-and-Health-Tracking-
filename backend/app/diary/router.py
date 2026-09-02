@@ -10,6 +10,7 @@ from app.db import get_db
 from app.diary import service
 from app.meal_slots import DEFAULT_SLOT_TIMES, SLOTS
 from app.models.user import User
+from app.planner import service as planner
 from app.profiles import service as profiles
 
 router = APIRouter(prefix="/diary", tags=["diary"])
@@ -167,6 +168,10 @@ def create_entry(
         )
     except service.FoodNotFound as exc:
         raise HTTPException(status.HTTP_404_NOT_FOUND, str(exc)) from exc
+
+    # Eating something other than what was planned re-plans the rest of that
+    # day -- only that day. The week is left alone unless the user asks.
+    planner.replan_after_log(db, user, payload.date, payload.slot, payload.food_id)
 
     db.commit()
     return CreatedEntry(id=entry.id)
