@@ -1,3 +1,6 @@
+import uuid
+from collections.abc import Iterable
+
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
@@ -51,6 +54,66 @@ def compute_dish_nutrients(db: Session, dish: Dish) -> dict[str, float]:
         return {}
 
     return {code: total * 100.0 / cooked_grams for code, total in totals.items()}
+
+
+def compute_dish_nutrients_bulk(
+    db: Session, dish_ids: Iterable[uuid.UUID]
+) -> dict[uuid.UUID, dict[str, float]]:
+    """`compute_dish_nutrients` for many dishes, in two queries rather than 2n.
+
+    The same arithmetic, deliberately kept in this module so the formula has one
+    home: sum each nutrient over the recipe, divide by the cooked weight. The
+    planner loads a pool of dozens of dishes on every re-plan and cannot afford a
+    query per dish.
+
+    Dishes with no recipe rows are absent from the result rather than empty --
+    those carry fixed `DishNutrient` values, which the caller reads through
+    `compute_dish_nutrients` for the one dish that needs it.
+    """
+    ids = list(dish_ids)
+    if not ids:
+        return {}
+
+    yields = dict(
+        db.execute(select(Dish.id, Dish.yield_factor).where(Dish.id.in_(ids))).all()
+    )
+    rows = db.execute(
+        select(
+            DishIngredient.dish_id,
+            DishIngredient.id,
+            DishIngredient.grams,
+            IngredientNutrient.per_100g,
+            Nutrient.code,
+        )
+        .join(
+            IngredientNutrient,
+            IngredientNutrient.ingredient_id == DishIngredient.ingredient_id,
+        )
+        .join(Nutrient, Nutrient.id == IngredientNutrient.nutrient_id)
+        .where(DishIngredient.dish_id.in_(ids))
+    ).all()
+
+    totals: dict[uuid.UUID, dict[str, float]] = {}
+    raw_grams: dict[uuid.UUID, float] = {}
+    # An ingredient appears once per nutrient it carries; its weight counts once.
+    seen_rows: set[uuid.UUID] = set()
+
+    for dish_id, row_id, grams, per_100g, code in rows:
+        if row_id not in seen_rows:
+            raw_grams[dish_id] = raw_grams.get(dish_id, 0.0) + grams
+            seen_rows.add(row_id)
+        bucket = totals.setdefault(dish_id, {})
+        bucket[code] = bucket.get(code, 0.0) + per_100g * grams / 100.0
+
+    computed: dict[uuid.UUID, dict[str, float]] = {}
+    for dish_id, nutrients in totals.items():
+        cooked_grams = raw_grams[dish_id] * (yields.get(dish_id) or 1.0)
+        if cooked_grams <= 0:
+            continue
+        computed[dish_id] = {
+            code: total * 100.0 / cooked_grams for code, total in nutrients.items()
+        }
+    return computed
 
 
 def dish_coverage(db: Session, dish: Dish) -> dict[str, float]:

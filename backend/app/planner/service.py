@@ -17,11 +17,15 @@ from sqlalchemy import delete, or_, select
 from sqlalchemy.orm import Session
 
 from app.diary import service as diary
-from app.foods.measures import Measure, format_quantity, measures_for_food, resolve_grams
-from app.foods.nutrition import compute_dish_nutrients, nutrients_for_portion
+from app.foods.measures import Measure, format_quantity, normalise_measure_name, resolve_grams
+from app.foods.nutrition import (
+    compute_dish_nutrients,
+    compute_dish_nutrients_bulk,
+    nutrients_for_portion,
+)
 from app.households import service as households
 from app.meal_slots import DEFAULT_SLOT_TIMES, SLOTS
-from app.models.food import Dish, DishIngredient, Ingredient
+from app.models.food import Dish, DishIngredient, Ingredient, PortionMeasure
 from app.models.plan import MealPlan, MealPlanItem
 from app.models.profile import AvoidedFood, FavouriteIngredient, MealSlotTime, Profile
 from app.models.user import User
@@ -171,12 +175,60 @@ def _slots_from_tags(slot_tags: str | None) -> frozenset[str]:
     )
 
 
+def _recipes_for(
+    db: Session, dish_ids: Sequence[uuid.UUID]
+) -> dict[uuid.UUID, list[tuple[uuid.UUID, str]]]:
+    """Every pool dish's ingredients, in one query, grouped in Python."""
+    rows = db.execute(
+        select(DishIngredient.dish_id, Ingredient.id, Ingredient.name)
+        .join(DishIngredient, DishIngredient.ingredient_id == Ingredient.id)
+        .where(DishIngredient.dish_id.in_(dish_ids))
+        .order_by(Ingredient.name)
+    ).all()
+
+    recipes: dict[uuid.UUID, list[tuple[uuid.UUID, str]]] = {}
+    for dish_id, ingredient_id, name in rows:
+        recipes.setdefault(dish_id, []).append((ingredient_id, name))
+    return recipes
+
+
+def _measures_for(db: Session, dish_ids: Sequence[uuid.UUID]) -> dict[uuid.UUID, list[Measure]]:
+    """Every pool dish's own measures, in one query.
+
+    `measures_for_food` appends the generic set ("1 cup" at 240 g and friends);
+    those are approximate by construction and `portion_ladder` drops them, so
+    the pool never needs them. Ordered so the ladder's fallback -- the first
+    measure, when none is flagged default -- does not depend on the query plan.
+    """
+    rows = db.scalars(
+        select(PortionMeasure)
+        .where(PortionMeasure.dish_id.in_(dish_ids))
+        .order_by(PortionMeasure.dish_id, PortionMeasure.is_default.desc(), PortionMeasure.grams)
+    ).all()
+
+    measures: dict[uuid.UUID, list[Measure]] = {}
+    for row in rows:
+        measures.setdefault(row.dish_id, []).append(
+            Measure(
+                name=normalise_measure_name(row.measure_name),
+                grams=row.grams,
+                is_default=row.is_default,
+                is_approximate=False,
+            )
+        )
+    return measures
+
+
 def load_pool(db: Session, user: User) -> list[Candidate]:
     """Every dish the planner may consider, in a stable order.
 
     Only dishes with slot tags are plannable -- that is the authored set. INDB
     reference dishes carry no slots and no recipe, and are for logging what was
     eaten out rather than for suggesting what to cook.
+
+    Loaded with a fixed number of queries rather than three per dish: this runs
+    on every swap and on every off-plan log, and per-dish queries made that
+    ~220 round trips over the seeded pool.
     """
     dishes = db.scalars(
         select(Dish)
@@ -189,15 +241,18 @@ def load_pool(db: Session, user: User) -> list[Candidate]:
         )
         .order_by(Dish.code)
     ).all()
+    if not dishes:
+        return []
+
+    dish_ids = [dish.id for dish in dishes]
+    recipes = _recipes_for(db, dish_ids)
+    measures_by_dish = _measures_for(db, dish_ids)
+    nutrients = compute_dish_nutrients_bulk(db, dish_ids)
 
     pool = []
     for dish in dishes:
-        recipe = db.execute(
-            select(Ingredient.id, Ingredient.name)
-            .join(DishIngredient, DishIngredient.ingredient_id == Ingredient.id)
-            .where(DishIngredient.dish_id == dish.id)
-        ).all()
-        measures = measures_for_food(db, dish.id, "dish")
+        recipe = recipes.get(dish.id, [])
+        measures = measures_by_dish.get(dish.id, [])
         portions = portion_ladder(measures)
         default = next((m for m in measures if m.is_default and not m.is_approximate), None)
 
@@ -210,9 +265,11 @@ def load_pool(db: Session, user: User) -> list[Candidate]:
                 # vegetarian day is the mistake that costs nothing; the seed set
                 # is fully tagged, so this only guards future user dishes.
                 diet=dish.diet_tags or "nonveg",
-                ingredient_ids=frozenset(row.id for row in recipe),
-                ingredient_names=tuple(row.name for row in recipe),
-                per_100g=compute_dish_nutrients(db, dish),
+                ingredient_ids=frozenset(row[0] for row in recipe),
+                ingredient_names=tuple(row[1] for row in recipe),
+                # A dish with no recipe carries fixed per-100g values instead,
+                # which is one dish's worth of query rather than the pool's.
+                per_100g=nutrients.get(dish.id) or compute_dish_nutrients(db, dish),
                 portions=portions,
                 default_grams=default.grams if default else portions[0].grams,
             )

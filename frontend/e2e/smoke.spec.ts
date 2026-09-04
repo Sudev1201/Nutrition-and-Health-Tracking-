@@ -16,7 +16,9 @@ import { expect, test } from '@playwright/test'
  *    not implement at all — `setupTests.ts` shims them and says outright that
  *    they are verified manually. This is the first automated check of the real
  *    thing.
- *  - The Plan screen on the real planner, rather than the fixture it shipped with.
+ *  - The Plan screen on the real planner, rather than the fixture it shipped with,
+ *    and -- when the database carries the full ETL -- a swap and a lock against the
+ *    real dish pool, which is the path `load_pool` runs on every edit.
  */
 
 const SEARCH_DEBOUNCE_MS = 400
@@ -157,5 +159,59 @@ test.describe('the tracking loop', () => {
     await page.getByRole('button', { name: /regenerate week/i }).click()
     await expect(page.getByRole('region', { name: 'Sunday' })).toBeVisible()
     await expect(page.getByRole('alert')).toHaveCount(0)
+  })
+
+  test('a planned dish can be swapped, and a locked one survives a regenerate', async ({
+    page,
+  }) => {
+    await page.goto('/plan')
+    await expect(page.getByRole('region', { name: 'Saturday' })).toBeVisible()
+
+    // Only plan rows carry a Swap button, which keeps the nav's list items out of
+    // the match. Against the CI seed there are none -- slot-tagged dishes come
+    // only from the full ETL -- so this walk skips rather than asserting on a
+    // week it knows to be blank. Locally, against a seeded database, it runs.
+    const rows = page
+      .getByRole('listitem')
+      .filter({ has: page.getByRole('button', { name: 'Swap' }) })
+    test.skip((await rows.count()) === 0, 'no slot-tagged dishes seeded; needs the full ETL')
+
+    // The first <p> in a row is the dish name; the slot label above it is a span.
+    const row = rows.first()
+    const dish = row.getByRole('paragraph').first()
+    const before = (await dish.textContent()) ?? ''
+    expect(before).not.toBe('')
+
+    // --- swap ----------------------------------------------------------------
+    // The swap excludes the dish it replaces and keeps the row, so the one thing
+    // that must change is the name in this same row.
+    await row.getByRole('button', { name: 'Swap' }).click()
+    await expect(dish).not.toHaveText(before)
+    await expect(page.getByRole('alert')).toHaveCount(0)
+
+    // --- lock ----------------------------------------------------------------
+    await row.getByRole('button', { name: 'Lock' }).click()
+    await expect(row.getByText('Locked', { exact: true })).toBeVisible()
+    await expect(row.getByRole('button', { name: 'Swap' })).toBeDisabled()
+    const locked = (await dish.textContent()) ?? ''
+
+    // --- regenerate around it -----------------------------------------------
+    // The hook invalidates rather than reading the mutation's body, so the plan
+    // on screen is the refetched one. Wait for that GET, not just the POST, or
+    // the assertion below would be reading the plan from before the click.
+    const refetched = page.waitForResponse(
+      (response) =>
+        response.request().method() === 'GET' && response.url().includes('/plan/week?'),
+    )
+    await page.getByRole('button', { name: /regenerate week/i }).click()
+    await refetched
+
+    await expect(dish).toHaveText(locked)
+    await expect(row.getByText('Locked', { exact: true })).toBeVisible()
+
+    // --- unlock, so the next run's regenerate starts from a free week --------
+    await row.getByRole('button', { name: 'Unlock' }).click()
+    await expect(row.getByText('Locked', { exact: true })).toBeHidden()
+    await expect(row.getByRole('button', { name: 'Swap' })).toBeEnabled()
   })
 })

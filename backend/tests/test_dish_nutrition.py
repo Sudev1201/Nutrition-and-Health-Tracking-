@@ -1,6 +1,10 @@
 import pytest
 
-from app.foods.nutrition import compute_dish_nutrients, nutrients_for_portion
+from app.foods.nutrition import (
+    compute_dish_nutrients,
+    compute_dish_nutrients_bulk,
+    nutrients_for_portion,
+)
 from app.models.food import Dish, DishIngredient, Ingredient, IngredientNutrient
 from app.models.nutrient import Nutrient
 from etl.load_nutrients import seed_nutrients
@@ -50,3 +54,39 @@ def test_an_empty_recipe_yields_nothing_rather_than_failing(db):
     db.flush()
 
     assert compute_dish_nutrients(db, dish) == {}
+
+
+# --- the bulk path the planner reads through ----------------------------------------------
+
+
+def test_the_bulk_loader_agrees_with_the_single_dish_figure(db, simple_dish):
+    """`load_pool` reads every dish through the bulk path, so the formula must not fork.
+
+    Rice carries two nutrients here so its weight appears on two joined rows; the
+    dedupe that counts it once is the part a one-nutrient recipe would never test.
+    """
+    calcium = db.query(Nutrient).filter_by(code="calcium").one()
+    rice = db.query(Ingredient).filter_by(code="t:rice").one()
+    db.add(IngredientNutrient(ingredient_id=rice.id, nutrient_id=calcium.id, per_100g=10.0))
+    db.flush()
+
+    single = compute_dish_nutrients(db, simple_dish)
+    bulk = compute_dish_nutrients_bulk(db, [simple_dish.id])
+
+    assert bulk == {simple_dish.id: single}
+    # 10 mg in 200 g raw, 400 g cooked: 2.5 mg per 100 g as served. Had rice's
+    # weight been counted twice, this would read 2.0 and protein 6.0.
+    assert bulk[simple_dish.id]["calcium"] == pytest.approx(2.5)
+    assert bulk[simple_dish.id]["protein"] == pytest.approx(7.5)
+
+
+def test_the_bulk_loader_leaves_out_a_dish_with_no_recipe(db, simple_dish):
+    """Absent rather than empty: the caller falls back to the fixed per-100g values."""
+    fixed = Dish(code="t:fixed", name="Fixed", source="indb", is_editable=False)
+    db.add(fixed)
+    db.flush()
+
+    bulk = compute_dish_nutrients_bulk(db, [simple_dish.id, fixed.id])
+
+    assert set(bulk) == {simple_dish.id}
+    assert compute_dish_nutrients_bulk(db, []) == {}
