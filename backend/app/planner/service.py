@@ -299,7 +299,10 @@ def _food_refs(db: Session, user: User, model) -> tuple[FoodRef, ...]:
 
 def build_context(db: Session, user: User, profile: Profile, day: datetime.date) -> DayContext:
     """Goals from the targets service, constraints from the profile, facts from the diary."""
-    resolved = targets.resolve_day(db, user, day)
+    # `as_of` keeps today out of the ledger's window: the planner asks about days
+    # from today forward, and today is still being eaten. Reading a partial day as
+    # a finished one put every following day's goals ~30% high before lunchtime.
+    resolved = targets.resolve_day(db, user, day, as_of=local_today(user))
     if resolved is None:
         raise NoProfile
     goals = {

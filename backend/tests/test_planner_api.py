@@ -133,6 +133,17 @@ def _user(db) -> User:
     return db.scalar(select(User).where(User.email == "track@example.com"))
 
 
+def log(api, dish: Dish, on: datetime.date, slot: str, grams: float = 200) -> None:
+    created = api.post(
+        "/diary/entries",
+        json={
+            "date": str(on), "slot": slot, "food_id": str(dish.id),
+            "food_kind": "dish", "grams": grams, "is_estimated": False,
+        },
+    )
+    assert created.status_code == 201, created.text
+
+
 # --- shape and lifecycle ---------------------------------------------------------------
 
 
@@ -359,6 +370,41 @@ def test_warfarin_holds_vitamin_k_steady_in_the_planner(signed_in, planner_pool,
     assert context.hold_steady == frozenset({"vitamin_k"})
 
 
+# --- goals: the ledger and the day in progress -----------------------------------------
+
+
+def test_todays_partial_log_does_not_inflate_tomorrows_goals(signed_in, planner_pool, db):
+    """A day still being eaten is not a day of eating almost nothing.
+
+    `resolve_day` reads any day with something logged on it as a finished day, so
+    before this fix a breakfast logged at 10 a.m. handed tomorrow a whole day's
+    shortfall and every future goal came out high. Yesterday is a finished day
+    and must still carry -- both halves are asserted here, because a fix that
+    silenced the second one would be worse than the bug.
+    """
+    signed_in.put("/profile", json=NON_VEG_PROFILE)
+    today = datetime.datetime.now(KOLKATA).date()
+    tomorrow = today + datetime.timedelta(days=1)
+    yesterday = today - datetime.timedelta(days=1)
+    user = _user(db)
+    profile = profiles.get_profile(db, user)
+    published = signed_in.get(f"/targets/today?date={tomorrow}").json()["nutrients"]
+    rda = {row["code"]: row["rda"] for row in published}
+
+    log(signed_in, planner_pool["test:idli"], today, "breakfast", grams=50)
+
+    goals = planner.build_context(db, user, profile, tomorrow).goals
+    assert goals["energy"].amount == pytest.approx(rda["energy"])
+    assert goals["calcium"].amount == pytest.approx(rda["calcium"])
+
+    # The same 50 g on a day that has ended does carry: a two-day nutrient hands
+    # its shortfall to the next two days, and the second of those is tomorrow.
+    log(signed_in, planner_pool["test:idli"], yesterday, "breakfast", grams=50)
+
+    after = planner.build_context(db, user, profile, tomorrow).goals
+    assert after["calcium"].amount > rda["calcium"]
+
+
 # --- editing the plan -------------------------------------------------------------------
 
 
@@ -423,17 +469,6 @@ def test_someone_elses_item_is_not_found(signed_in, planner_pool):
 
 
 # --- deviation: re-plan the rest of the day ----------------------------------------------
-
-
-def log(api, dish: Dish, on: datetime.date, slot: str) -> None:
-    created = api.post(
-        "/diary/entries",
-        json={
-            "date": str(on), "slot": slot, "food_id": str(dish.id),
-            "food_kind": "dish", "grams": 200, "is_estimated": False,
-        },
-    )
-    assert created.status_code == 201, created.text
 
 
 def test_logging_something_off_plan_replans_only_the_rest_of_that_day(signed_in, planner_pool):

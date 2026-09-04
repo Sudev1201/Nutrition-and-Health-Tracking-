@@ -142,8 +142,20 @@ def _policies(
     return policies
 
 
-def resolve_day(db: Session, user: User, target_date: datetime.date) -> DayTargets | None:
-    """Targets for one day, with the ledger recomputed from the diary."""
+def resolve_day(
+    db: Session,
+    user: User,
+    target_date: datetime.date,
+    as_of: datetime.date | None = None,
+) -> DayTargets | None:
+    """Targets for one day, with the ledger recomputed from the diary.
+
+    `as_of` is the caller's today: the day in progress is not a finished day, so
+    it earns no carry. Without it, a breakfast-only log at 10 a.m. reads as a
+    whole day's shortfall and inflates tomorrow's goals by the rest of today.
+    The targets screen leaves it unset -- it asks about one day at a time, and
+    the days before today have all ended.
+    """
     from app.diary import service as diary  # imported here to avoid a cycle
 
     profile = profiles.get_profile(db, user)
@@ -184,6 +196,14 @@ def resolve_day(db: Session, user: User, target_date: datetime.date) -> DayTarge
     start = target_date - datetime.timedelta(days=COMPENSATION_WINDOW_DAYS)
     day = start
     while day < target_date:
+        # A day that has not ended yet is untracked for the same reason an empty
+        # one is: what it holds so far is a part of a day, and costing it against
+        # a whole day's target would carry a shortfall the user has all evening
+        # to eat away.
+        if as_of is not None and day >= as_of:
+            day += datetime.timedelta(days=1)
+            continue
+
         consumed = diary.consumed_on(db, user, day)
 
         # A day with nothing logged is untracked, not a day of eating nothing.
