@@ -17,6 +17,7 @@ from app.models.profile import Profile
 from app.models.reference import RdaReference, UpperLimit
 from app.models.user import User
 from app.nutrition_core.compensation import (
+    SURPLUS_CARRY_DAYS,
     NutrientPolicy,
     carry_cap_for,
     effective_target,
@@ -184,16 +185,31 @@ def _policies(
     for code, target in targets.items():
         row = nutrients.get(code)
         compensable = bool(row and row.is_compensable) and code not in disabled
+        excess_sensitive = bool(row and row.is_excess_sensitive)
+        compensation_days = (row.compensation_days if row else 0) if compensable else 0
+        if compensable:
+            # A surplus spreads over the days a shortfall would, as it always has.
+            surplus_days = compensation_days
+        elif excess_sensitive and code not in disabled:
+            # Sodium, saturated fat, free sugar and cholesterol carry no shortfall,
+            # but the spec still lowers the next two days after a surplus of them
+            # (manual step 5). A lowered ceiling has no EAR to stop it, and that is
+            # the point.
+            surplus_days = SURPLUS_CARRY_DAYS
+        else:
+            # Excreted, unknown, or held steady: a surplus lowers nothing.
+            surplus_days = 0
         policies[code] = NutrientPolicy(
             code=code,
             is_compensable=compensable,
-            compensation_days=(row.compensation_days if row else 0) if compensable else 0,
-            is_excess_sensitive=bool(row and row.is_excess_sensitive),
+            compensation_days=compensation_days,
+            is_excess_sensitive=excess_sensitive,
             # A floor the ledger may not lower past, where the target itself has no
             # EAR -- energy, whose floor is the one recalibration respects.
             ear=floors.get(code, target.ear),
             tul=target.tul,
             carry_cap_fraction=carry_cap_for(code),
+            surplus_days=surplus_days,
         )
     return policies
 

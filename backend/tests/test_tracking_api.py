@@ -7,6 +7,10 @@ numbers they assert are the real ICMR-NIN ones without depending on the ETL.
 import datetime
 
 import pytest
+from sqlalchemy import select
+
+from app.models.food import Dish, DishIngredient, Ingredient, IngredientNutrient
+from app.models.nutrient import Nutrient
 
 TODAY = datetime.date(2026, 8, 17)
 YESTERDAY = TODAY - datetime.timedelta(days=1)
@@ -573,3 +577,64 @@ def test_the_tracking_endpoints_require_sign_in(api_client):
     assert api_client.get("/profile").status_code == 401
     assert api_client.get(f"/targets/today?date={TODAY}").status_code == 401
     assert api_client.get(f"/diary?date={TODAY}").status_code == 401
+
+
+# --- a harmful surplus lowers the next days, ceilings included ---------------
+#
+# Spec manual step 5: log a very high-sodium day, and the next days' sodium
+# ceilings drop. Sodium carries no shortfall -- a low-salt day is not a debt --
+# and until a surplus had days of its own to spread over, a salty day went nowhere.
+
+
+@pytest.fixture
+def salty_dish(db, reference_data) -> Dish:
+    """1,000 mg of sodium per 100 g and nothing else, so no other nutrient moves."""
+    sodium = db.scalar(select(Nutrient).where(Nutrient.code == "sodium"))
+    ingredient = Ingredient(code="test:salted-mixture", name="Salted mixture", source="IFCT")
+    db.add(ingredient)
+    db.flush()
+    db.add(
+        IngredientNutrient(
+            ingredient_id=ingredient.id, nutrient_id=sodium.id, per_100g=1000.0, source="IFCT"
+        )
+    )
+    dish = Dish(
+        code="test:mixture-plate",
+        name="Mixture plate",
+        source="authored",
+        is_editable=True,
+        yield_factor=1.0,
+    )
+    db.add(dish)
+    db.flush()
+    db.add(DishIngredient(dish_id=dish.id, ingredient_id=ingredient.id, grams=100.0))
+    db.flush()
+    return dish
+
+
+def test_a_salty_day_lowers_the_next_two_days_sodium_ceilings(signed_in, salty_dish):
+    """4,000 mg against the 2,000 mg ceiling is a 2,000 mg surplus. Half of it is
+    1,000 mg a day, past the 30% cap, so each of the next two days is lowered by
+    600 mg, to 1,400 mg -- and the day after those is back to 2,000 mg."""
+    signed_in.put("/profile", json=PROFILE)
+    logged = signed_in.post(
+        "/diary/entries",
+        json={
+            "date": str(YESTERDAY), "slot": "lunch", "food_id": str(salty_dish.id),
+            "food_kind": "dish", "grams": 400, "is_estimated": False,
+        },
+    )
+    assert logged.status_code == 201, logged.text
+
+    for offset in (0, 1):
+        day = TODAY + datetime.timedelta(days=offset)
+        sodium = nutrient(signed_in.get(f"/targets/today?date={day}").json(), "sodium")
+        assert sodium["rda"] == 2000
+        assert sodium["carried_in"] == pytest.approx(-600)
+        assert sodium["target_effective"] == pytest.approx(1400)
+        assert sodium["carried_from"] == "Sunday"  # 16 August 2026
+
+    after = TODAY + datetime.timedelta(days=2)
+    sodium = nutrient(signed_in.get(f"/targets/today?date={after}").json(), "sodium")
+    assert sodium["carried_in"] == 0
+    assert sodium["target_effective"] == pytest.approx(2000)

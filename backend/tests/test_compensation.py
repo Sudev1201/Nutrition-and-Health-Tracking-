@@ -7,12 +7,16 @@ table, which is where the spec's research is stored as data rather than code.
 
 import pytest
 
+from app.models.nutrient import Nutrient
 from app.nutrition_core.compensation import (
     DEFAULT_CARRY_CAP,
+    SURPLUS_CARRY_DAYS,
     NutrientPolicy,
     effective_target,
     plan_carry,
 )
+from app.nutrition_core.targets import Target
+from app.targets.service import _policies
 
 
 def policy(**overrides) -> NutrientPolicy:
@@ -158,3 +162,136 @@ def test_a_nutrient_with_no_floor_can_still_be_reduced():
 
 def test_a_target_never_goes_negative_even_without_a_floor():
     assert effective_target(SODIUM, base_target=300, carried_in=-900) == 0
+
+
+# --- a harmful surplus of a ceiling -------------------------------------------
+#
+# Sodium carries no shortfall, so its policy has no compensation days -- and until
+# a surplus had days of its own, a 4,000 mg day lowered nothing at all. The spec
+# lowers the next two days after any excess-sensitive surplus (manual step 5).
+
+# Sodium as `_policies` builds it: no shortfall carry, no EAR, and no ICMR upper
+# limit -- its 2,000 mg figure is itself the ceiling.
+SALT = policy(
+    code="sodium", is_compensable=False, compensation_days=0,
+    is_excess_sensitive=True, ear=None, tul=None, surplus_days=SURPLUS_CARRY_DAYS,
+)
+
+
+def test_a_salty_day_lowers_the_next_two_days():
+    """A 2,000 mg surplus halves to 1,000 mg a day, past the 30% cap of 600 mg."""
+    plan = plan_carry(SALT, consumed=4000, effective_target=2000, base_target=2000)
+
+    assert [carry.day_offset for carry in plan.carries] == [1, 2]
+    assert [carry.amount for carry in plan.carries] == [-600, -600]
+
+
+def test_what_the_cap_refuses_of_a_salty_day_expires():
+    plan = plan_carry(SALT, consumed=4000, effective_target=2000, base_target=2000)
+
+    assert plan.expired == pytest.approx(800)
+
+
+def test_a_modest_sodium_surplus_is_split_evenly():
+    plan = plan_carry(SALT, consumed=2600, effective_target=2000, base_target=2000)
+
+    assert [carry.amount for carry in plan.carries] == [-300, -300]
+    assert plan.expired == 0
+
+
+def test_a_sodium_shortfall_still_never_carries_up():
+    """Surplus days are for a surplus. A low-salt day is not a debt."""
+    plan = plan_carry(SALT, consumed=900, effective_target=2000, base_target=2000)
+
+    assert plan.carries == ()
+
+
+def test_a_lowered_ceiling_has_no_floor_to_stop_it():
+    """Two salty days in a row add up, and nothing props the ceiling back up:
+    less sodium is never a shortfall."""
+    assert effective_target(SALT, base_target=2000, carried_in=-600) == 1400
+    assert effective_target(SALT, base_target=2000, carried_in=-1200) == 800
+
+
+def test_surplus_days_default_to_the_compensation_days():
+    """Unset, a surplus spreads exactly as it did before surplus days existed."""
+    plan = plan_carry(
+        policy(compensation_days=1), consumed=1400, effective_target=1000, base_target=1000
+    )
+
+    assert [carry.day_offset for carry in plan.carries] == [1]
+    assert [carry.amount for carry in plan.carries] == [-300]
+
+
+def test_surplus_days_leave_a_shortfall_to_the_compensation_days():
+    plan = plan_carry(
+        policy(compensation_days=1, surplus_days=2),
+        consumed=600, effective_target=1000, base_target=1000,
+    )
+
+    assert [carry.day_offset for carry in plan.carries] == [1]
+
+
+def test_no_surplus_days_lets_the_whole_surplus_expire():
+    """What a nutrient held steady gets: it is smoothed in neither direction."""
+    plan = plan_carry(
+        policy(surplus_days=0), consumed=1400, effective_target=1000, base_target=1000
+    )
+
+    assert plan.carries == ()
+    assert plan.expired == pytest.approx(400)
+
+
+# --- how the targets service builds each policy ---------------------------------
+
+
+def nutrient_row(code: str, compensable: bool, days: int, excess_sensitive: bool) -> Nutrient:
+    """A `nutrients` row, never saved: `_policies` reads only its policy columns."""
+    return Nutrient(
+        code=code, display_name=code, unit="mg", category="mineral",
+        is_compensable=compensable, compensation_days=days,
+        is_excess_sensitive=excess_sensitive,
+    )
+
+
+# The policy columns as the seed has them (etl/load_nutrients.py).
+ROWS = {
+    "sodium": nutrient_row("sodium", compensable=False, days=0, excess_sensitive=True),
+    "calcium": nutrient_row("calcium", compensable=True, days=2, excess_sensitive=True),
+    "vitamin_k": nutrient_row("vitamin_k", compensable=True, days=1, excess_sensitive=False),
+    "protein": nutrient_row("protein", compensable=False, days=0, excess_sensitive=False),
+}
+TARGETS = {
+    "sodium": Target("sodium", ear=None, rda=2000.0, tul=None, kind="ceiling"),
+    "calcium": Target("calcium", ear=800.0, rda=1000.0, tul=2500.0, kind="target"),
+    "vitamin_k": Target("vitamin_k", ear=None, rda=55.0, tul=None, kind="target"),
+    "protein": Target("protein", ear=42.9, rda=53.95, tul=None, kind="target"),
+}
+
+
+def test_a_ceiling_spreads_a_surplus_over_two_days_and_carries_no_shortfall():
+    sodium = _policies(TARGETS, ROWS, disabled=frozenset())["sodium"]
+
+    assert sodium.surplus_days == SURPLUS_CARRY_DAYS
+    assert sodium.is_compensable is False
+    assert sodium.compensation_days == 0
+
+
+def test_a_compensable_nutrient_spreads_a_surplus_as_it_always_has():
+    policies = _policies(TARGETS, ROWS, disabled=frozenset())
+
+    assert policies["calcium"].surplus_days == 2
+    assert policies["vitamin_k"].surplus_days == 1
+
+
+def test_a_nutrient_that_is_not_excess_sensitive_has_no_surplus_days():
+    assert _policies(TARGETS, ROWS, disabled=frozenset())["protein"].surplus_days == 0
+
+
+def test_a_nutrient_held_steady_is_not_lowered_after_a_surplus():
+    """Only vitamin K is held steady today, on warfarin. Whatever is held steady
+    next -- a ceiling included -- is smoothed in neither direction."""
+    policies = _policies(TARGETS, ROWS, disabled=frozenset({"vitamin_k", "sodium"}))
+
+    assert policies["vitamin_k"].surplus_days == 0
+    assert policies["sodium"].surplus_days == 0

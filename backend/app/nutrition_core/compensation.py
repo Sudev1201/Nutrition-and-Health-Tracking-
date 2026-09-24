@@ -23,6 +23,12 @@ FIBRE_CARRY_CAP = 0.25
 
 CARRY_CAPS = {"fibre": FIBRE_CARRY_CAP}
 
+# How many following days a harmful surplus is taken back out of, when the
+# nutrient carries no shortfall. The spec lowers "the next 2 days' targets" after
+# any excess-sensitive surplus. Sodium and the other ceilings are never carried
+# up, since a low-salt day is not a debt, but a salty day still lowers the next two.
+SURPLUS_CARRY_DAYS = 2
+
 
 @dataclass(frozen=True)
 class NutrientPolicy:
@@ -35,6 +41,9 @@ class NutrientPolicy:
     ear: float | None
     tul: float | None
     carry_cap_fraction: float = DEFAULT_CARRY_CAP
+    # Days a harmful surplus is spread over. None means compensation_days, which is
+    # every existing call site's behaviour.
+    surplus_days: int | None = None
 
 
 @dataclass(frozen=True)
@@ -73,8 +82,9 @@ def plan_carry(
     return CarryPlan(carries=(), expired=0.0)
 
 
-def _spread(policy: NutrientPolicy, amount: float, base_target: float, sign: int) -> CarryPlan:
-    days = policy.compensation_days
+def _spread(
+    policy: NutrientPolicy, amount: float, base_target: float, sign: int, days: int
+) -> CarryPlan:
     if days <= 0:
         return CarryPlan(carries=(), expired=amount)
 
@@ -82,7 +92,9 @@ def _spread(policy: NutrientPolicy, amount: float, base_target: float, sign: int
     share = amount / days
 
     carried = min(share, per_day_cap)
-    carries = tuple(Carry(day_offset=offset, amount=sign * carried) for offset in range(1, days + 1))
+    carries = tuple(
+        Carry(day_offset=offset, amount=sign * carried) for offset in range(1, days + 1)
+    )
 
     # Anything the cap refused is gone: the debt does not roll onward for ever.
     return CarryPlan(carries=carries, expired=amount - carried * days)
@@ -92,12 +104,13 @@ def _plan_shortfall(policy: NutrientPolicy, deficit: float, base_target: float) 
     """A deficit only carries when the body can actually buffer the nutrient.
 
     Protein cannot (no storage pool), and a sodium shortfall is not a deficit
-    worth making up at all — both fall through to `expired`, which is what the
-    weekly report shows as uncompensated.
+    worth making up at all — both fall through to `expired`. Only a target
+    nutrient's expired shortfall is reported as uncompensated (protein's, for
+    instance); a ceiling's never is, since less sodium is not a gap.
     """
     if not policy.is_compensable:
         return CarryPlan(carries=(), expired=deficit)
-    return _spread(policy, deficit, base_target, sign=1)
+    return _spread(policy, deficit, base_target, sign=1, days=policy.compensation_days)
 
 
 def _plan_surplus(policy: NutrientPolicy, surplus: float, base_target: float) -> CarryPlan:
@@ -106,10 +119,14 @@ def _plan_surplus(policy: NutrientPolicy, surplus: float, base_target: float) ->
     Water-soluble vitamin surpluses are excreted, so there is nothing to
     rebalance and nothing to report — those return an empty plan with no expiry,
     which is different from a shortfall that expired.
+
+    A harmful one spreads over `surplus_days` rather than `compensation_days`:
+    sodium carries no shortfall, but a salty day still lowers the days after it.
     """
     if not policy.is_excess_sensitive:
         return CarryPlan(carries=(), expired=0.0)
-    return _spread(policy, surplus, base_target, sign=-1)
+    days = policy.surplus_days if policy.surplus_days is not None else policy.compensation_days
+    return _spread(policy, surplus, base_target, sign=-1, days=days)
 
 
 def effective_target(policy: NutrientPolicy, base_target: float, carried_in: float) -> float:
