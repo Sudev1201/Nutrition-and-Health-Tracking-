@@ -62,6 +62,20 @@ def _require_migrated_schema(engine: Engine) -> None:
         )
 
 
+@pytest.fixture(scope="session", autouse=True)
+def scheduler_off():
+    """Keep the reminder loop out of the suite, whatever `.env` says.
+
+    Every TestClient runs the app's lifespan, which starts the loop when
+    SCHEDULER_ENABLED is set. The loop opens its own sessions on the development
+    database, outside the test's rolled-back transaction. Under the suite it
+    would send real pushes, from development data, to devices subscribed there.
+    """
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(settings, "scheduler_enabled", False)
+        yield
+
+
 @pytest.fixture(scope="session")
 def engine():
     test_engine = create_engine(settings.test_database_url, pool_pre_ping=True)
