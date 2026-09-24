@@ -83,16 +83,31 @@ function NutrientRow({ nutrient }: { nutrient: ReportNutrient }) {
    * The week's intake against its summed EAR and target: the DRI framework's own
    * "average daily intake over 1 or more weeks". A daily upper limit is never
    * summed into a weekly one, so it is left out here, and the days past it are
-   * counted on their own. A ceiling's own figure is its limit, so a ceiling's week
-   * is still set against its summed ceilings.
+   * counted on their own. A ceiling's own figure is its limit, so as a fallback
+   * (below) a ceiling's week is set against its summed ceilings, but that summed
+   * standing is overridden the moment even one measured day went over.
    */
-  const status = nutrientStatus({
+  let status = nutrientStatus({
     consumed: nutrient.consumed_total,
     ear: nutrient.ear_total,
     rda: nutrient.target_total,
     tul: null,
     kind: nutrient.kind,
   })
+
+  /*
+   * `days_over_limit` counts TUL crossings only (see types.ts), so it is always 0
+   * for a ceiling -- sodium has no TUL -- and never says anything about a ceiling
+   * nutrient going over. A ceiling's own daily figure IS its limit, so a day it
+   * was not met (consumed at or past the effective ceiling -- exactly Today's
+   * "above the limit", `summary.is_met`) is a day over the limit. Good days in the
+   * same week must not average that away into an "on target" reading.
+   */
+  const overLimitDays =
+    nutrient.kind === 'ceiling'
+      ? nutrient.measured_days - nutrient.days_met
+      : nutrient.days_over_limit
+  if (nutrient.kind === 'ceiling' && overLimitDays > 0) status = 'above-limit'
 
   return (
     <tr className="border-b border-border last:border-b-0">
@@ -110,10 +125,8 @@ function NutrientRow({ nutrient }: { nutrient: ReportNutrient }) {
       </td>
       <td className="px-4 py-2">
         <span className={STATUS_TEXT[status]}>{STATUS_LABELS[status]}</span>
-        {nutrient.days_over_limit > 0 && (
-          <span className="block text-xs text-above-limit">
-            {overLimitWords(nutrient.days_over_limit)}
-          </span>
+        {overLimitDays > 0 && (
+          <span className="block text-xs text-above-limit">{overLimitWords(overLimitDays)}</span>
         )}
         {/*
           Partial coverage is reported rather than hidden, as on Today. The total

@@ -72,7 +72,15 @@ export interface ReportNutrient {
   consumed_total: number
   /** Measured days in Today's "on target" band. */
   days_met: number
-  /** Measured days at or past the daily upper limit. No weekly sum is set against it. */
+  /**
+   * Measured days at or past the daily *upper limit* (TUL) only -- always 0 for a
+   * ceiling nutrient, which has no TUL of its own (sodium's daily figure is
+   * already its ceiling). No weekly sum is set against it.
+   *
+   * A ceiling's own days over its limit are not carried in this field: derive
+   * them as `measured_days - days_met` (`kind === 'ceiling'`), which is exactly
+   * the days the day's own consumption reached its effective ceiling.
+   */
   days_over_limit: number
   /** Mean share of each measured day's food weight that carried a figure for it, 0 to 1. */
   coverage: number

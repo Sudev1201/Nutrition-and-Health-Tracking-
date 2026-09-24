@@ -213,6 +213,26 @@ test('notes days past the upper limit apart from the week’s standing', async (
   expect(nutrientRow('Protein').queryByText(/over the limit/)).not.toBeInTheDocument()
 })
 
+/*
+ * `days_over_limit` counts TUL crossings only, so it is always 0 for a ceiling.
+ * A ceiling's own days over its limit are the days it was not met, and a week
+ * that has some must never read as a week within bounds.
+ */
+test('a ceiling shows its own days over the limit, not the TUL-only count', async () => {
+  stubReport({
+    ...REPORT_FIXTURE,
+    nutrients: REPORT_FIXTURE.nutrients.map((nutrient) =>
+      nutrient.code === 'sodium' ? { ...nutrient, days_met: 3, consumed_total: 11100 } : nutrient,
+    ),
+  })
+  renderScreen()
+  await loaded()
+
+  expect(nutrientRow('Sodium').getByText('3 days over the limit')).toBeInTheDocument()
+  // Three salty days must not be averaged into a week that reads "on target".
+  expect(nutrientRow('Sodium').getByText('past the upper limit')).toBeInTheDocument()
+})
+
 test('says how much of the food a figure speaks for', async () => {
   renderScreen()
   await loaded()
