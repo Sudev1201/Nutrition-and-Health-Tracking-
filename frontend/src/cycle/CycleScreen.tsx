@@ -222,7 +222,7 @@ export function CycleScreen() {
           </Card>
 
           <div className="grid gap-4 lg:grid-cols-2">
-            <CycleDayForm />
+            <CycleDayForm days={data.days} />
             {/* Keyed on the saved answers, so the boxes reset when they change. */}
             <ScreeningCard
               key={data.screening?.answered_on ?? 'none'}

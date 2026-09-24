@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { http, HttpResponse } from 'msw'
 import { MemoryRouter } from 'react-router-dom'
@@ -173,6 +173,20 @@ test('will not save a day with nothing in it', async () => {
   renderScreen()
 
   expect(await screen.findByRole('button', { name: 'Save day' })).toBeDisabled()
+})
+
+// PUT /cycle/days/{date} replaces the whole day, so picking a date that already
+// has an entry must show what is already logged, or saving would silently wipe
+// it -- and, for a bleed day, the coaching that depends on it.
+test('picking an already-logged date prefills its flow and symptoms', async () => {
+  renderScreen()
+
+  fireEvent.change(await screen.findByLabelText('Date'), { target: { value: '2026-08-15' } })
+
+  expect(await screen.findByLabelText('Bleeding')).toHaveValue('heavy')
+  expect(screen.getByRole('checkbox', { name: 'Cramps' })).toBeChecked()
+  expect(screen.getByRole('checkbox', { name: 'Bloating' })).not.toBeChecked()
+  expect(screen.getByRole('button', { name: 'Update day' })).toBeInTheDocument()
 })
 
 test('sends the screening answers', async () => {
