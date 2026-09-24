@@ -32,6 +32,9 @@ BMR_COEFFICIENTS = {
 KCAL_PER_KG_BODY_FAT = 7700.0
 PACE_KG_PER_WEEK = {"gentle": 0.25, "steady": 0.5}
 
+# The conventional floor for calorie restriction without medical supervision.
+SAFE_FLOOR_KCAL = {"female": 1200.0, "male": 1500.0}
+
 
 @dataclass(frozen=True)
 class Body:
@@ -71,7 +74,7 @@ def total_energy_expenditure(body: Body) -> float:
 
 
 def energy_target(body: Body, goal: str, pace: str | None) -> float:
-    """The daily energy target for a goal, clamped so it never drops below BMR.
+    """The daily energy target for a goal, never below BMR or, for a loss, the safe floor.
 
     An unclamped deficit on a small, sedentary, older person lands under resting
     expenditure, which is not a diet. The clamp is the floor the spec requires;
@@ -88,7 +91,10 @@ def energy_target(body: Body, goal: str, pace: str | None) -> float:
     daily_change = PACE_KG_PER_WEEK[pace] * KCAL_PER_KG_BODY_FAT / 7.0
 
     if goal == "lose":
-        return max(maintenance - daily_change, basal_metabolic_rate(body))
+        # Never below BMR, and never below the safe floor -- unless maintenance itself
+        # is lower, since a loss goal must never ask for more than maintenance.
+        floor = max(basal_metabolic_rate(body), min(maintenance, SAFE_FLOOR_KCAL[body.sex]))
+        return max(maintenance - daily_change, floor)
     if goal == "gain":
         return maintenance + daily_change
 

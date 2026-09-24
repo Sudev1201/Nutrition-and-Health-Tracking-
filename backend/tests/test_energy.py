@@ -8,7 +8,12 @@ to within 0.32%, and the residual is ICMR's own rounding, not an error here.
 
 import pytest
 
-from app.nutrition_core.energy import Body, basal_metabolic_rate, energy_target
+from app.nutrition_core.energy import (
+    Body,
+    basal_metabolic_rate,
+    energy_target,
+    total_energy_expenditure,
+)
 
 TOLERANCE_KCAL = 12
 
@@ -112,3 +117,23 @@ def test_an_unknown_activity_level_is_refused():
             goal="maintain",
             pace=None,
         )
+
+
+def test_a_loss_target_never_falls_below_the_safe_floor():
+    """1,200 kcal for women and 1,500 for men is the conventional floor for cutting
+    calories without medical supervision. BMR alone sits under it for many smaller
+    and older people, so the clamp takes the higher of the two."""
+    woman = Body(sex="female", age=65, weight_kg=55.0, activity="sedentary")
+    man = Body(sex="male", age=65, weight_kg=65.0, activity="sedentary")
+
+    assert energy_target(woman, goal="lose", pace="steady") == 1200.0
+    assert energy_target(man, goal="lose", pace="steady") == 1500.0
+
+
+def test_a_loss_target_never_asks_for_more_than_maintenance():
+    """The floor gives way where maintenance itself is lower (1,404.5 kcal here)."""
+    body = Body(sex="male", age=70, weight_kg=45.0, activity="sedentary")
+
+    assert energy_target(body, goal="lose", pace="steady") == pytest.approx(
+        total_energy_expenditure(body)
+    )
