@@ -27,9 +27,9 @@ from app.local_time import local_today
 from app.meal_slots import DEFAULT_SLOT_TIMES, SLOTS
 from app.models.food import Dish, DishIngredient, Ingredient, PortionMeasure
 from app.models.plan import MealPlan, MealPlanItem
-from app.models.profile import AvoidedFood, FavouriteIngredient, MealSlotTime, Profile
+from app.models.profile import AvoidedFood, FavouriteIngredient, MealSlotTime, Medication, Profile
 from app.models.user import User
-from app.nutrition_core.conditions import EMPTY_STOMACH_DRUGS
+from app.nutrition_core.conditions import EMPTY_STOMACH_DRUGS, POTASSIUM_SPARING_DRUGS
 from app.planner import engine, rules
 from app.planner.engine import DayInput, NutrientGoal, PlannedItem
 from app.planner.rules import Candidate, DayRules, FoodRef, Observance, Portion
@@ -79,6 +79,8 @@ class DayContext:
     # this carries which they were, which is what stops one being suggested twice.
     eaten: frozenset[uuid.UUID] = frozenset()
     consumed: dict[str, float] = field(default_factory=dict)
+    # What a stored emphasis may not push on this day: see `_never_emphasised`.
+    never_emphasised: frozenset[str] = frozenset()
 
 
 @dataclass(frozen=True)
@@ -324,9 +326,10 @@ def build_context(db: Session, user: User, profile: Profile, day: datetime.date)
     times = {slot: _default_time(slot) for slot in SLOTS}
     times.update({item.slot: _slot_time(item, day) for item in meal_times})
 
+    medications = profiles.get_medications(db, user)
     doses = [
         item.taken_at
-        for item in profiles.get_medications(db, user)
+        for item in medications
         if any(name in item.name.lower() for name in EMPTY_STOMACH_DRUGS)
     ]
     minutes_since: dict[str, int | None] = {}
@@ -359,7 +362,67 @@ def build_context(db: Session, user: User, profile: Profile, day: datetime.date)
         logged=frozenset(entry.slot for entry in entries),
         eaten=frozenset(e.dish_id for e in entries if e.dish_id is not None),
         consumed=diary.consumed_on(db, user, day),
+        never_emphasised=_never_emphasised(resolved.hold_steady, medications),
     )
+
+
+# --- last week's report, this week's emphasis ---------------------------------------------
+
+
+def emphasised(
+    goals: dict[str, NutrientGoal], emphasis: frozenset[str]
+) -> dict[str, NutrientGoal]:
+    """The goals, with each emphasised target's shortfall weighed EMPHASIS_FACTOR more.
+
+    The weight is the planner's usual one times the factor -- never the goal's
+    current weight times it -- so applying an emphasis twice changes nothing.
+    """
+    weighted = dict(goals)
+    for code in emphasis:
+        goal = goals.get(code)
+        if goal is not None and goal.kind == "target":
+            usual = engine.NUTRIENT_WEIGHTS.get(code, engine.DEFAULT_WEIGHT)
+            weighted[code] = replace(goal, weight=usual * engine.EMPHASIS_FACTOR)
+    return weighted
+
+
+def plan_emphasis(plan: MealPlan) -> frozenset[str]:
+    """The nutrient codes a stored plan leans on; empty when it leans on none."""
+    return frozenset((plan.emphasis or "").split())
+
+
+def _last_weeks_emphasis(db: Session, user: User, week_start: datetime.date) -> str:
+    """What `MealPlan.emphasis` stores for a week: the codes last week's report suggests.
+
+    Read when a plan is made and when it is regenerated, never on a swap or a
+    re-plan, so a week's plan leans the same way from Sunday to Saturday.
+    """
+    # Imported here to avoid a cycle: the report service reads this module's pool.
+    from app.reports import service as reports
+
+    previous = week_start - datetime.timedelta(days=WEEK_DAYS)
+    today = local_today(user)
+    if previous >= today:
+        # Planning ahead: the week before this one has no finished day yet.
+        return ""
+    return " ".join(reports.suggested_codes(db, user, previous, today))
+
+
+def _never_emphasised(
+    hold_steady: frozenset[str], medications: Sequence[Medication]
+) -> frozenset[str]:
+    """What no emphasis may push, whatever last week's report said.
+
+    The report leaves these out already, but a plan's emphasis is fixed for its
+    week: someone who starts warfarin or ramipril on a Wednesday must not have
+    Thursday's re-plan lean on vitamin K or potassium.
+    """
+    unsafe = set(hold_steady)
+    if any(
+        name in item.name.lower() for item in medications for name in POTASSIUM_SPARING_DRUGS
+    ):
+        unsafe.add("potassium")
+    return frozenset(unsafe)
 
 
 # --- stored plans ------------------------------------------------------------------------------
@@ -452,10 +515,12 @@ def _day_input(
     open_slots: Sequence[str],
     fixed: Sequence[PlannedItem],
     favourites: tuple[FoodRef, ...],
+    *,
+    emphasis: frozenset[str],
 ) -> DayInput:
     return DayInput(
         date=context.date,
-        goals=context.goals,
+        goals=emphasised(context.goals, emphasis - context.never_emphasised),
         slots={s: tuple(rules.candidates_for_slot(pool, s, context.rules)) for s in open_slots},
         fixed=tuple(fixed),
         consumed=context.consumed,
@@ -477,6 +542,9 @@ def generate_week(
     Days that have already ended are left exactly as they are: you cannot plan
     yesterday. Slots that are logged, skipped or switched off are not planned,
     and what was logged counts toward the day so the plan covers the remainder.
+
+    Every day leans on what last week's report found short, read afresh when
+    the plan is made or regenerated and stored on it.
     """
     profile = profiles.get_profile(db, user)
     if profile is None:
@@ -486,12 +554,20 @@ def generate_week(
 
     plan = get_plan(db, user, week_start)
     if plan is None:
-        plan = MealPlan(user_id=user.id, week_start=week_start, seed=_new_seed())
+        plan = MealPlan(
+            user_id=user.id,
+            week_start=week_start,
+            seed=_new_seed(),
+            emphasis=_last_weeks_emphasis(db, user, week_start),
+        )
         db.add(plan)
         db.flush()
     elif reseed:
         plan.seed = _new_seed()
+        # Last week's diary may have been filled in since the plan was made.
+        plan.emphasis = _last_weeks_emphasis(db, user, week_start)
         db.flush()
+    emphasis = plan_emphasis(plan)
 
     rng = random.Random(plan.seed)
     pool = load_pool(db, user)
@@ -524,7 +600,9 @@ def generate_week(
         closed = context.disabled | context.skipped | context.logged | {f.slot for f in fixed}
         open_slots = [slot for slot in SLOTS if slot not in closed]
 
-        inputs.append(_day_input(context, pool, open_slots, fixed, favourites))
+        inputs.append(
+            _day_input(context, pool, open_slots, fixed, favourites, emphasis=emphasis)
+        )
         open_by_day[day] = open_slots
         contexts[day] = context
 
@@ -590,7 +668,9 @@ def replan_after_log(
     ]
     pool = load_pool(db, user)
     favourites = _food_refs(db, user, FavouriteIngredient)
-    day_input = _day_input(context, pool, open_slots, fixed, favourites)
+    day_input = _day_input(
+        context, pool, open_slots, fixed, favourites, emphasis=plan_emphasis(plan)
+    )
 
     week_rows = db.scalars(select(MealPlanItem).where(MealPlanItem.plan_id == plan.id)).all()
     uses = Counter(row.dish_id for row in week_rows if row.plan_date != day)
@@ -636,7 +716,7 @@ def swap_item(db: Session, user: User, item_id: uuid.UUID) -> MealPlan:
     ]
     day_input = _day_input(
         context, load_pool(db, user), [item.slot], others,
-        _food_refs(db, user, FavouriteIngredient),
+        _food_refs(db, user, FavouriteIngredient), emphasis=plan_emphasis(plan),
     )
     rng = random.Random(f"{plan.seed}:{item.id}:{item.dish_id}")
 

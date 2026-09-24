@@ -9,10 +9,12 @@ import datetime
 import itertools
 import random
 import uuid
+from dataclasses import replace
 
 import pytest
 
 from app.planner.engine import (
+    EMPHASIS_FACTOR,
     DayInput,
     NutrientGoal,
     PlannedItem,
@@ -301,3 +303,49 @@ def test_no_alternative_when_every_other_candidate_is_excluded():
     assert alternative_for(
         day(slots={"lunch": (DAL_RICE,)}), "lunch", rng(), exclude=frozenset({DAL_RICE.dish_id})
     ) is None
+
+
+# --- emphasis: what last week's report found short -------------------------------------
+
+
+def test_an_emphasised_target_weighs_its_shortfall_more():
+    plain = {"calcium": GOALS["calcium"]}
+    # Calcium's usual weight is 1.5; emphasised, it is 1.5 x 1.5.
+    stressed = {"calcium": replace(GOALS["calcium"], weight=1.5 * EMPHASIS_FACTOR)}
+
+    # Half the goal is a relative shortfall of 0.5.
+    assert weighted_gap({"calcium": 500.0}, plain) == pytest.approx(0.75)
+    assert weighted_gap({"calcium": 500.0}, stressed) == pytest.approx(1.125)
+    # An emphasis costs nothing once the goal is met.
+    assert weighted_gap({"calcium": 1000.0}, stressed) == 0.0
+
+
+def test_a_weight_leaves_a_ceiling_alone():
+    heavy = {"sodium": replace(GOALS["sodium"], weight=9.0)}
+
+    # 3,000 mg is 50% over the 2,000 mg ceiling, costed at CEILING_WEIGHT's 2.0.
+    assert weighted_gap({"sodium": 3000.0}, heavy) == pytest.approx(1.0)
+
+
+# Two lunches a close call apart: pesarattu carries the protein, ragi mudde the
+# calcium. One portion each, so the only thing being chosen is the dish.
+PESARATTU = candidate(
+    "Pesarattu", {"lunch"}, energy=400, protein=20, calcium=60, grams=(100.0,)
+)
+RAGI_MUDDE = candidate(
+    "Ragi mudde", {"lunch"}, energy=400, protein=5, calcium=340, grams=(100.0,)
+)
+
+
+def test_an_emphasis_tips_a_close_choice_toward_its_nutrient():
+    lunch = {"lunch": (PESARATTU, RAGI_MUDDE)}
+    stressed = {**GOALS, "calcium": replace(GOALS["calcium"], weight=1.5 * EMPHASIS_FACTOR)}
+
+    # At the usual weights pesarattu's extra 15 g of protein is worth 0.50 and
+    # ragi mudde's extra 280 mg of calcium 0.42, so pesarattu wins by 0.08. At
+    # calcium's emphasised 2.25 the calcium is worth 0.63: ragi mudde, by 0.13.
+    usual = plan_day(day(slots=lunch), rng())
+    leaning = plan_day(day(slots=lunch, goals=stressed), rng())
+
+    assert [item.dish_id for item in usual] == [PESARATTU.dish_id]
+    assert [item.dish_id for item in leaning] == [RAGI_MUDDE.dish_id]

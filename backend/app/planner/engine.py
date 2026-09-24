@@ -29,6 +29,10 @@ SLOT_ENERGY_SHARE = {
 # day; the rest count once. Anything not listed weighs 1.0.
 NUTRIENT_WEIGHTS = {"energy": 3.0, "protein": 2.0, "fibre": 1.5, "calcium": 1.5, "iron": 1.5}
 DEFAULT_WEIGHT = 1.0
+# A nutrient last week's report found short weighs this much more in the next
+# week's plan. Enough to tip a close choice toward the dish that carries it; not
+# so much that any emphasised nutrient outweighs energy, which sizes the day.
+EMPHASIS_FACTOR = 1.5
 # Going over a ceiling (sodium, saturated fat) is worse than falling short of a target.
 CEILING_WEIGHT = 2.0
 # Crossing a tolerable upper limit is not a trade-off; it should never win.
@@ -58,6 +62,10 @@ class NutrientGoal:
     amount: float  # the day's effective target, or its ceiling
     kind: str  # target | ceiling
     tul: float | None = None
+    # The weight on a target's relative shortfall. None is the planner's usual
+    # figure from NUTRIENT_WEIGHTS; a week's emphasis sets it higher. A ceiling's
+    # overshoot always weighs CEILING_WEIGHT, so this is never read for one.
+    weight: float | None = None
 
 
 @dataclass(frozen=True)
@@ -102,6 +110,13 @@ def add_totals(*parts: dict[str, float]) -> dict[str, float]:
     return totals
 
 
+def _shortfall_weight(goal: NutrientGoal) -> float:
+    """What falling short of a target costs, per unit of relative shortfall."""
+    if goal.weight is not None:
+        return goal.weight
+    return NUTRIENT_WEIGHTS.get(goal.code, DEFAULT_WEIGHT)
+
+
 def weighted_gap(totals: dict[str, float], goals: dict[str, NutrientGoal]) -> float:
     """How far a day is from its goals, as one number. Zero is a perfect day."""
     gap = 0.0
@@ -112,8 +127,7 @@ def weighted_gap(totals: dict[str, float], goals: dict[str, NutrientGoal]) -> fl
         if goal.kind == "ceiling":
             gap += CEILING_WEIGHT * max(0.0, have / goal.amount - 1.0)
         else:
-            weight = NUTRIENT_WEIGHTS.get(goal.code, DEFAULT_WEIGHT)
-            gap += weight * max(0.0, 1.0 - have / goal.amount)
+            gap += _shortfall_weight(goal) * max(0.0, 1.0 - have / goal.amount)
         if goal.tul is not None and have > goal.tul:
             gap += UPPER_LIMIT_PENALTY * (have / goal.tul - 1.0)
     return gap

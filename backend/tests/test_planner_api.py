@@ -18,6 +18,7 @@ from app.models.household import HouseholdMember
 from app.models.nutrient import Nutrient
 from app.models.plan import MealPlan, MealPlanItem
 from app.models.user import User
+from app.planner import engine
 from app.planner import service as planner
 from app.profiles import service as profiles
 from tests.test_tracking_api import PROFILE
@@ -612,3 +613,170 @@ def test_the_cooking_view_names_members_whose_plans_share_a_dish(signed_in, plan
     assert overlaps == [
         {"slot": "lunch", "dish_name": mine["dish_name"], "members": ["Amma", "Tracker"]},
     ]
+
+
+# --- last week's report leans this week's plan ------------------------------------------------
+
+
+def this_and_last_week() -> tuple[datetime.date, datetime.date]:
+    """This week's Sunday, and the Sunday before it: a week that has ended."""
+    this_week = planner.week_start_for(datetime.datetime.now(KOLKATA).date())
+    return this_week, this_week - datetime.timedelta(days=7)
+
+
+def log_rice_lunches(api, rice: Dish, week_start: datetime.date, days: int) -> None:
+    """200 g of plain rice for lunch from the Monday on: 60 mg of calcium a day, of 1,000."""
+    for offset in range(1, days + 1):
+        log(api, rice, week_start + datetime.timedelta(days=offset), "lunch")
+
+
+def first_arguments(monkeypatch, name: str) -> list:
+    """Spy on `engine.<name>`, recording the first argument of every call to it."""
+    seen: list = []
+    original = getattr(engine, name)
+
+    def spy(first, *args, **kwargs):
+        seen.append(first)
+        return original(first, *args, **kwargs)
+
+    monkeypatch.setattr(engine, name, spy)
+    return seen
+
+
+def test_an_emphasis_raises_only_the_named_targets_weight():
+    goals = {
+        "calcium": engine.NutrientGoal("calcium", "Calcium", 1000.0, "target"),
+        "iron": engine.NutrientGoal("iron", "Iron", 19.0, "target"),
+        "sodium": engine.NutrientGoal("sodium", "Sodium", 2000.0, "ceiling"),
+    }
+
+    leaning = planner.emphasised(goals, frozenset({"calcium", "sodium", "vitamin_d"}))
+
+    assert leaning["calcium"].weight == pytest.approx(2.25)  # calcium's 1.5, times 1.5
+    assert leaning["calcium"].amount == 1000.0
+    assert leaning["iron"] == goals["iron"]
+    # A ceiling has no shortfall to weigh, and a code with no goal adds none.
+    assert leaning["sodium"] == goals["sodium"]
+    assert set(leaning) == set(goals)
+
+
+def test_applying_an_emphasis_twice_changes_nothing():
+    goals = {"calcium": engine.NutrientGoal("calcium", "Calcium", 1000.0, "target")}
+
+    once = planner.emphasised(goals, frozenset({"calcium"}))
+
+    assert planner.emphasised(once, frozenset({"calcium"})) == once
+
+
+def test_a_plans_emphasis_reads_back_as_a_set():
+    assert planner.plan_emphasis(MealPlan(emphasis="calcium protein")) == {"calcium", "protein"}
+    assert planner.plan_emphasis(MealPlan(emphasis="")) == frozenset()
+    # A row not yet flushed has no column default applied.
+    assert planner.plan_emphasis(MealPlan()) == frozenset()
+
+
+def test_a_week_short_on_calcium_emphasises_it_next_week(
+    signed_in, planner_pool, reference_data, db, monkeypatch
+):
+    signed_in.put("/profile", json=NON_VEG_PROFILE)
+    this_week, last_week = this_and_last_week()
+    # Four tracked days, each at 6% of the calcium goal.
+    log_rice_lunches(signed_in, reference_data, last_week, days=4)
+    planned = first_arguments(monkeypatch, "plan_week")
+
+    week(signed_in, this_week)
+
+    assert "calcium" in planner.get_plan(db, _user(db), this_week).emphasis.split()
+    # Every day the plan covers leans on it, not only the first.
+    days = planned[0]
+    assert days
+    assert all(day.goals["calcium"].weight == pytest.approx(2.25) for day in days)
+
+
+def test_a_thinly_logged_week_leaves_the_next_plan_unemphasised(
+    signed_in, planner_pool, reference_data, db
+):
+    signed_in.put("/profile", json=NON_VEG_PROFILE)
+    this_week, last_week = this_and_last_week()
+    # Two tracked days are too few to call anything a pattern.
+    log_rice_lunches(signed_in, reference_data, last_week, days=2)
+
+    week(signed_in, this_week)
+
+    assert planner.get_plan(db, _user(db), this_week).emphasis == ""
+
+
+def test_the_emphasis_stands_until_the_week_is_regenerated(
+    signed_in, planner_pool, reference_data, db
+):
+    signed_in.put("/profile", json=NON_VEG_PROFILE)
+    this_week, last_week = this_and_last_week()
+    week(signed_in, this_week)
+
+    # Last week is filled in after the plan was made. The stored plan stands...
+    log_rice_lunches(signed_in, reference_data, last_week, days=4)
+    week(signed_in, this_week)
+    assert planner.get_plan(db, _user(db), this_week).emphasis == ""
+
+    # ...until a regenerate reads last week again.
+    regenerated = signed_in.post("/plan/week/regenerate", json={"start": str(this_week)})
+    assert regenerated.status_code == 200, regenerated.text
+    assert "calcium" in planner.get_plan(db, _user(db), this_week).emphasis.split()
+
+
+def test_a_swap_plans_with_the_stored_emphasis(signed_in, planner_pool, db, monkeypatch):
+    signed_in.put("/profile", json=NON_VEG_PROFILE)
+    lunch = item_in(week(signed_in), MONDAY, "lunch")
+    planner.get_plan(db, _user(db), WEEK).emphasis = "calcium"
+    db.flush()
+    swapped_with = first_arguments(monkeypatch, "alternative_for")
+
+    assert signed_in.post(f"/plan/items/{lunch['id']}/swap", json={}).status_code == 200
+
+    assert swapped_with[0].goals["calcium"].weight == pytest.approx(2.25)
+    assert swapped_with[0].goals["protein"].weight is None
+
+
+def test_an_off_plan_log_replans_with_the_stored_emphasis(
+    signed_in, planner_pool, db, monkeypatch
+):
+    signed_in.put("/profile", json=NON_VEG_PROFILE)
+    planned_lunch = item_in(week(signed_in), MONDAY, "lunch")
+    planner.get_plan(db, _user(db), WEEK).emphasis = "calcium"
+    db.flush()
+    replanned_with = first_arguments(monkeypatch, "plan_day")
+    off_plan = next(
+        d for d in planner_pool.values()
+        if str(d.id) != planned_lunch["dish_id"] and "lunch" in d.slot_tags
+    )
+
+    log(signed_in, off_plan, MONDAY, "lunch")
+
+    assert len(replanned_with) == 1
+    assert replanned_with[0].goals["calcium"].weight == pytest.approx(2.25)
+
+
+def test_a_stored_emphasis_never_pushes_potassium_on_ramipril(
+    signed_in, planner_pool, db, monkeypatch
+):
+    """Spec manual step 7b, for a drug started mid-week.
+
+    The report stops suggesting potassium the moment ramipril is on the profile,
+    but this week's plan was made before that and keeps its emphasis until it
+    is regenerated. The swap must not lean on potassium in the meantime.
+    """
+    signed_in.put("/profile", json=NON_VEG_PROFILE)
+    lunch = item_in(week(signed_in), MONDAY, "lunch")
+    planner.get_plan(db, _user(db), WEEK).emphasis = "potassium calcium"
+    db.flush()
+    signed_in.put(
+        "/profile",
+        json={**NON_VEG_PROFILE, "medications": [{"name": "Ramipril", "time": "08:00"}]},
+    )
+    swapped_with = first_arguments(monkeypatch, "alternative_for")
+
+    assert signed_in.post(f"/plan/items/{lunch['id']}/swap", json={}).status_code == 200
+
+    goals = swapped_with[0].goals
+    assert goals["potassium"].weight is None
+    assert goals["calcium"].weight == pytest.approx(2.25)
