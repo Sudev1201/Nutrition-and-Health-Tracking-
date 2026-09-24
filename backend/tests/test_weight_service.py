@@ -96,6 +96,35 @@ def test_resolve_day_follows_the_step(db, user):
     assert nutrient(resolved, "thiamine").rda == pytest.approx(1.4 * (formula - 210.0) / formula)
 
 
+def test_a_step_today_does_not_recost_yesterday(db, user, signed_in, reference_data):
+    """Yesterday had no offset in force and was eaten exactly at its own target.
+
+    A step taken today must not read that day as a surplus against today's
+    stepped figure -- the ledger window must cost each day against the offset
+    that was actually in force on it, per the plan's rule against re-costing
+    finished days.
+    """
+    # The pre-step target: the formula at the weight the step will land on
+    # (66 kg), with no offset -- exactly what `offset_on(yesterday)` reports.
+    formula = energy_target(
+        Body(sex="male", age=25, weight_kg=66.0, activity="sedentary"), goal="maintain", pace=None
+    )
+    grams = formula / 150.0 * 100.0  # reference_data's dish: 150 kcal / 100 g
+    response = signed_in.post(
+        "/diary/entries",
+        json={
+            "date": str(days_ago(1)), "slot": "lunch", "food_id": str(reference_data.id),
+            "food_kind": "dish", "grams": grams, "is_estimated": False,
+        },
+    )
+    assert response.status_code == 201
+
+    gain_half_a_kilo_a_week(db, user)  # takes the -210 kcal step today
+
+    energy = nutrient(targets.resolve_day(db, user, TODAY), "energy")
+    assert energy.carried_in == pytest.approx(0.0, abs=1e-6)
+
+
 def test_today_says_the_target_was_recalibrated(db, user):
     gain_half_a_kilo_a_week(db, user)
     warnings = targets.resolve_day(db, user, TODAY).warnings

@@ -25,7 +25,12 @@ from app.nutrition_core.compensation import (
 from app.nutrition_core.conditions import Warning, apply_conditions
 from app.nutrition_core.energy import energy_target
 from app.nutrition_core.recalibration import lowest_target
-from app.nutrition_core.targets import ReferenceValue, Target, build_targets
+from app.nutrition_core.targets import (
+    ENERGY_SCALED_REFERENCES,
+    ReferenceValue,
+    Target,
+    build_targets,
+)
 from app.profiles import service as profiles
 from app.weight import service as weight
 
@@ -33,6 +38,15 @@ from app.weight import service as weight
 # determined by the four days before it. Walking that window from a clean slate
 # gives exact values without unbounded recursion into the user's whole history.
 COMPENSATION_WINDOW_DAYS = 4
+
+# The targets that move with the weight-driven offset: energy itself, the
+# macros `build_targets` derives from it, and the energy-scaled B vitamins. A
+# window day whose offset differs from target_date's must be costed against
+# its own figure for these -- never against target_date's stepped one.
+_ENERGY_DERIVED_CODES = (
+    frozenset({"energy", "fibre", "carbohydrate", "fat", "saturated_fat", "free_sugar"})
+    | ENERGY_SCALED_REFERENCES
+)
 
 
 @dataclass(frozen=True)
@@ -191,16 +205,19 @@ def resolve_day(
 
     body = profiles.body_of(profile)
     formula = energy_target(body, goal=profile.goal, pace=profile.pace)
+    references = load_references(db, profile)
+    upper_limits = load_upper_limits(db)
+    target_offset = weight.offset_on(db, user, target_date)
     base = build_targets(
         body,
         goal=profile.goal,
         pace=profile.pace,
         cereal_dominant=profile.cereal_dominant,
-        references=load_references(db, profile),
-        upper_limits=load_upper_limits(db),
+        references=references,
+        upper_limits=upper_limits,
         # The recalibration in force on this date, so a past day keeps the target
         # it had and a step taken today does not re-cost yesterday.
-        energy_offset_kcal=weight.offset_on(db, user, target_date),
+        energy_offset_kcal=target_offset,
     )
 
     overlay = apply_conditions(
@@ -224,6 +241,24 @@ def resolve_day(
         floors={"energy": lowest_target(body, formula)},
     )
 
+    # Window days whose offset differs from target_date's need their own
+    # energy-derived targets -- memoised by offset, since at most a couple of
+    # distinct values occur inside a four-day window.
+    offset_targets: dict[float, dict[str, Target]] = {target_offset: base}
+
+    def _targets_for_offset(offset: float) -> dict[str, Target]:
+        if offset not in offset_targets:
+            offset_targets[offset] = build_targets(
+                body,
+                goal=profile.goal,
+                pace=profile.pace,
+                cereal_dominant=profile.cereal_dominant,
+                references=references,
+                upper_limits=upper_limits,
+                energy_offset_kcal=offset,
+            )
+        return offset_targets[offset]
+
     # Walk the window forward, accumulating what each day hands to the next.
     carried: dict[datetime.date, dict[str, float]] = defaultdict(lambda: defaultdict(float))
     sources: dict[datetime.date, dict[str, datetime.date]] = defaultdict(dict)
@@ -245,6 +280,12 @@ def resolve_day(
         # Treating it as a total shortfall would flood every following day with
         # carries the user never earned.
         if consumed:
+            # The offset in force on THIS day, not target_date's. A step taken
+            # today must not re-cost a finished day that had a different (or no)
+            # offset in force -- see `_ENERGY_DERIVED_CODES` above.
+            day_offset = weight.offset_on(db, user, day)
+            day_base = base if day_offset == target_offset else _targets_for_offset(day_offset)
+
             for code, target in targets.items():
                 # The per-nutrient counterpart of the rule above. A code absent
                 # from the totals was measured by none of the day's foods, so a
@@ -254,13 +295,23 @@ def resolve_day(
                 if code not in consumed:
                     continue
 
+                day_rda = target.rda
+                if (
+                    day_offset != target_offset
+                    and code in _ENERGY_DERIVED_CODES
+                    and target is base.get(code)
+                ):
+                    # Untouched by the condition overlay, so the offset is the
+                    # only thing that moved it -- cost it at this day's figure.
+                    day_rda = day_base[code].rda
+
                 policy = policies[code]
-                today_target = effective_target(policy, target.rda, carried[day][code])
+                today_target = effective_target(policy, day_rda, carried[day][code])
                 plan = plan_carry(
                     policy,
                     consumed=consumed.get(code, 0.0),
                     effective_target=today_target,
-                    base_target=target.rda,
+                    base_target=day_rda,
                 )
                 for carry in plan.carries:
                     landing = day + datetime.timedelta(days=carry.day_offset)
