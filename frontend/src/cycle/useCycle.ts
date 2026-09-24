@@ -15,7 +15,9 @@ function useCycleMutation<TVariables>(mutationFn: (variables: TVariables) => Pro
   const queryClient = useQueryClient()
   return useMutation({
     mutationFn,
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['cycle'] }),
+    // Settled rather than succeeded: a request that failed after the server acted
+    // (an erase that timed out, say) must still show what the server now holds.
+    onSettled: () => queryClient.invalidateQueries({ queryKey: ['cycle'] }),
   })
 }
 
@@ -33,10 +35,9 @@ export function useClearCycleDay() {
   return useCycleMutation((date: string) => api.del(`/cycle/days/${date}`))
 }
 
+/** Sent without a date, so the server dates the answers with the user's own today. */
 export function useSaveScreening() {
-  return useCycleMutation((answers: ScreeningAnswers & { date: string }) =>
-    api.post('/cycle/screening', answers),
-  )
+  return useCycleMutation((answers: ScreeningAnswers) => api.post('/cycle/screening', answers))
 }
 
 export function useEraseCycle() {

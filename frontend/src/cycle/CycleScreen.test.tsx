@@ -9,7 +9,7 @@ import { CYCLE_FIXTURE } from '../mocks/fixtures/more'
 import { server } from '../mocks/server'
 import { todayIso } from '../today/useToday'
 import { CycleScreen } from './CycleScreen'
-import type { CycleState } from './types'
+import type { CycleDayInput, CycleState } from './types'
 
 let patched: unknown = null
 let saved: { date: string; body: unknown } | null = null
@@ -189,6 +189,46 @@ test('picking an already-logged date prefills its flow and symptoms', async () =
   expect(screen.getByRole('button', { name: 'Update day' })).toBeInTheDocument()
 })
 
+// No date: the server dates the answers with the user's own today, which the
+// browser's can differ from.
+// Remounting the form on every date change replaced the Date input mid-entry:
+// focus dropped to the page and the rest of what was typed went nowhere.
+test('typing a date keeps focus in the Date field, and prefills that day', async () => {
+  renderScreen()
+
+  const input = await screen.findByLabelText('Date')
+  await userEvent.clear(input)
+  await userEvent.type(input, '2026-08-15')
+
+  expect(input).toBeInTheDocument()
+  expect(input).toHaveFocus()
+  expect(input).toHaveValue('2026-08-15')
+  expect(screen.getByLabelText('Bleeding')).toHaveValue('heavy')
+  expect(screen.getByRole('checkbox', { name: 'Cramps' })).toBeChecked()
+})
+
+test('saving a day keeps the form in place', async () => {
+  let days = CYCLE_FIXTURE.days
+  server.use(
+    http.get(apiUrl('/cycle'), () => HttpResponse.json({ ...CYCLE_FIXTURE, days })),
+    http.put(apiUrl('/cycle/days/:date'), async ({ request, params }) => {
+      const day = (await request.json()) as CycleDayInput
+      days = [{ date: params.date as string, ...day }, ...days]
+      return HttpResponse.json({ ...CYCLE_FIXTURE, days })
+    }),
+  )
+  renderScreen()
+
+  await userEvent.selectOptions(await screen.findByLabelText('Bleeding'), 'heavy')
+  const button = screen.getByRole('button', { name: 'Save day' })
+  await userEvent.click(button)
+
+  // The refetch brings back the day just saved, and the same button now updates it.
+  await waitFor(() => expect(button).toHaveTextContent('Update day'))
+  expect(button).toBeInTheDocument()
+  expect(screen.getByLabelText('Bleeding')).toHaveValue('heavy')
+})
+
 test('sends the screening answers', async () => {
   renderScreen()
 
@@ -196,12 +236,11 @@ test('sends the screening answers', async () => {
   await userEvent.click(screen.getByRole('button', { name: 'Save answers' }))
 
   await waitFor(() =>
-    expect(answered).toEqual({
+    expect(answered).toStrictEqual({
       soaks_within_two_hours: true,
       longer_than_seven_days: false,
       large_clots: false,
       flooding: false,
-      date: todayIso(),
     }),
   )
 })
@@ -229,6 +268,75 @@ test('deleting the history asks first', async () => {
 
   await userEvent.click(screen.getByRole('button', { name: 'Delete everything' }))
   await waitFor(() => expect(erased).toBe(true))
+})
+
+// Erasing is the privacy control over menstrual data: a failure must not look
+// like success.
+test('says so when the history could not be deleted, and shows what is still stored', async () => {
+  let reads = 0
+  server.use(
+    http.get(apiUrl('/cycle'), () => {
+      reads += 1
+      return HttpResponse.json(CYCLE_FIXTURE)
+    }),
+    http.delete(apiUrl('/cycle'), () => new HttpResponse('boom', { status: 500 })),
+  )
+  renderScreen()
+
+  await userEvent.click(await screen.findByRole('button', { name: 'Delete my cycle history' }))
+  await userEvent.click(screen.getByRole('button', { name: 'Delete everything' }))
+
+  expect(await screen.findByRole('alert')).toHaveTextContent(
+    'Your cycle history could not be deleted. Please try again.',
+  )
+  expect(screen.getByRole('button', { name: 'Delete everything' })).toBeEnabled()
+  // A failed erase re-reads what the server holds rather than trusting the cache.
+  await waitFor(() => expect(reads).toBe(2))
+})
+
+test('says so when a day could not be removed', async () => {
+  server.use(
+    http.delete(apiUrl('/cycle/days/:date'), () => new HttpResponse('boom', { status: 500 })),
+  )
+  renderScreen()
+
+  await userEvent.click(await screen.findByRole('button', { name: 'Remove 16 Aug 2026' }))
+
+  expect(await screen.findByRole('alert')).toHaveTextContent(
+    'That day could not be removed. Please try again.',
+  )
+})
+
+test('says so when tracking could not be switched', async () => {
+  server.use(http.patch(apiUrl('/cycle'), () => new HttpResponse('boom', { status: 500 })))
+  renderScreen()
+
+  await userEvent.click(await screen.findByRole('switch', { name: /track my cycle/i }))
+
+  expect(await screen.findByRole('alert')).toHaveTextContent(
+    'Cycle tracking could not be changed. Please try again.',
+  )
+})
+
+test('the switch waits for the last change before taking another', async () => {
+  let release: () => void = () => {}
+  const held = new Promise<void>((resolve) => {
+    release = resolve
+  })
+  server.use(
+    http.patch(apiUrl('/cycle'), async () => {
+      await held
+      return HttpResponse.json(OFF)
+    }),
+  )
+  renderScreen()
+
+  const toggle = await screen.findByRole('switch', { name: /track my cycle/i })
+  await userEvent.click(toggle)
+
+  await waitFor(() => expect(toggle).toBeDisabled())
+  release()
+  await waitFor(() => expect(toggle).toBeEnabled())
 })
 
 test('history hidden by a profile change can still be erased', async () => {

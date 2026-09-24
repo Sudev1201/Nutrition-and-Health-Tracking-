@@ -89,6 +89,11 @@ function RecentDays({ data }: { data: CycleState }) {
           ))}
         </ul>
       )}
+      {clear.isError && (
+        <p role="alert" className="mt-2 text-sm text-above-limit">
+          That day could not be removed. Please try again.
+        </p>
+      )}
     </Card>
   )
 }
@@ -117,8 +122,21 @@ function EraseHistory() {
             >
               Delete everything
             </Button>
-            <Button onClick={() => setConfirming(false)}>Keep it</Button>
+            <Button
+              onClick={() => {
+                erase.reset()
+                setConfirming(false)
+              }}
+            >
+              Keep it
+            </Button>
           </div>
+          {/* No "nothing was removed": a request can fail after the server acted. */}
+          {erase.isError && (
+            <p role="alert" className="text-sm text-above-limit">
+              Your cycle history could not be deleted. Please try again.
+            </p>
+          )}
         </div>
       ) : (
         <Button variant="danger" className="mt-3" onClick={() => setConfirming(true)}>
@@ -173,8 +191,14 @@ export function CycleScreen() {
           label="Track my cycle"
           description="Off by default, and private within a household unless you choose to share it."
           checked={data.enabled}
+          disabled={setEnabled.isPending}
           onChange={(checked) => setEnabled.mutate(checked)}
         />
+        {setEnabled.isError && (
+          <p role="alert" className="mt-2 text-sm text-above-limit">
+            Cycle tracking could not be changed. Please try again.
+          </p>
+        )}
       </Card>
 
       {data.enabled && (

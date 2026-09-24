@@ -39,31 +39,25 @@ function dayKey(date: string, day: CycleDay | undefined): string {
  * would silently delete symptoms (and the coaching that depends on them).
  */
 export function CycleDayForm({ days }: { days: CycleDay[] }) {
+  const save = useSaveCycleDay()
   const [date, setDate] = useState(todayIso)
   const existing = findDay(date, days)
-
-  return (
-    <DayFields
-      key={dayKey(date, existing)}
-      date={date}
-      onDateChange={setDate}
-      existing={existing}
-    />
-  )
-}
-
-function DayFields({
-  date,
-  onDateChange,
-  existing,
-}: {
-  date: string
-  onDateChange: (date: string) => void
-  existing: CycleDay | undefined
-}) {
-  const save = useSaveCycleDay()
   const [flow, setFlow] = useState<Flow | ''>(existing?.flow ?? '')
   const [symptoms, setSymptoms] = useState<Symptom[]>(existing?.symptoms ?? [])
+
+  /*
+   * Re-seeded during render when the chosen day, or what is logged for it,
+   * changes: React's "adjust state when a prop changes". A `key` would do it by
+   * remounting, but that replaced the Date input on every keystroke of a date
+   * and the Save button on every save, so focus dropped to the page.
+   */
+  const seed = dayKey(date, existing)
+  const [seededFor, setSeededFor] = useState(seed)
+  if (seededFor !== seed) {
+    setSeededFor(seed)
+    setFlow(existing?.flow ?? '')
+    setSymptoms(existing?.symptoms ?? [])
+  }
 
   const empty = flow === '' && symptoms.length === 0
 
@@ -85,7 +79,11 @@ function DayFields({
               value={date}
               min={minLoggableDate()}
               max={todayIso()}
-              onChange={(event) => onDateChange(event.target.value)}
+              onChange={(event) => {
+                setDate(event.target.value)
+                // A failure saving one day says nothing about the next one picked.
+                save.reset()
+              }}
             />
           )}
         </Field>

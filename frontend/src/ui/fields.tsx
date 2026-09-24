@@ -97,11 +97,14 @@ export function Toggle({
   checked,
   onChange,
   description,
+  disabled,
 }: {
   label: ReactNode
   checked: boolean
   onChange: (checked: boolean) => void
   description?: string
+  /** For a change still being saved, so a second one cannot race it. */
+  disabled?: boolean
 }) {
   return (
     <label className="flex min-h-11 items-center justify-between gap-4 py-2 text-sm">
@@ -115,8 +118,9 @@ export function Toggle({
         type="checkbox"
         role="switch"
         checked={checked}
+        disabled={disabled}
         onChange={(event) => onChange(event.target.checked)}
-        className="size-5 shrink-0 accent-[var(--color-accent)]"
+        className="size-5 shrink-0 accent-[var(--color-accent)] disabled:opacity-50"
       />
     </label>
   )

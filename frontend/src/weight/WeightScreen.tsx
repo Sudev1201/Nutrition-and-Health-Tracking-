@@ -34,7 +34,13 @@ function rateWords(kgPerWeek: number): string {
 function WeighInForm() {
   const addWeighIn = useAddWeighIn()
   const [entry, setEntry] = useState('')
-  const [date, setDate] = useState(todayIso)
+  // Blurred once: "7" is on its way to "74", so the range error waits for it.
+  const [touched, setTouched] = useState(false)
+  // null is the user's today, which the server decides -- a browser in another
+  // timezone, or a screen left open past midnight, would send the wrong day. Only
+  // a day the user picked is sent.
+  const [date, setDate] = useState<string | null>(null)
+  const today = todayIso()
 
   const parsed = Number.parseFloat(entry)
   const valid = Number.isFinite(parsed) && parsed > MIN_KG && parsed <= MAX_KG
@@ -46,13 +52,18 @@ function WeighInForm() {
       <div className="mt-2 grid gap-x-3 sm:grid-cols-[1fr_1fr_auto] sm:items-end">
         <Field
           label="Weight in kg"
-          error={invalid ? `Please give a weight in kg between ${MIN_KG} and ${MAX_KG}.` : undefined}
+          error={
+            touched && invalid
+              ? `Please give a weight in kg between ${MIN_KG} and ${MAX_KG}.`
+              : undefined
+          }
         >
           {(fieldProps) => (
             <NumberInput
               {...fieldProps}
               value={entry}
               onChange={(event) => setEntry(event.target.value)}
+              onBlur={() => setTouched(true)}
               placeholder="74.2"
             />
           )}
@@ -62,9 +73,11 @@ function WeighInForm() {
             <TextInput
               {...fieldProps}
               type="date"
-              value={date}
-              max={todayIso()}
-              onChange={(event) => setDate(event.target.value)}
+              value={date ?? today}
+              max={today}
+              onChange={(event) =>
+                setDate(event.target.value === todayIso() ? null : event.target.value)
+              }
             />
           )}
         </Field>
@@ -73,8 +86,16 @@ function WeighInForm() {
           className="mb-4"
           disabled={!valid || date === '' || addWeighIn.isPending}
           onClick={() =>
-            // Cleared only once saved, so a failed save does not lose what was typed.
-            addWeighIn.mutate({ weight_kg: parsed, date }, { onSuccess: () => setEntry('') })
+            addWeighIn.mutate(date === null ? { weight_kg: parsed } : { weight_kg: parsed, date }, {
+              // Reset only once saved, so a failed save does not lose what was typed.
+              // The date goes back to today: a back-dated day that stuck would make
+              // the next weigh-in overwrite it, and never read the trend.
+              onSuccess: () => {
+                setEntry('')
+                setTouched(false)
+                setDate(null)
+              },
+            })
           }
         >
           Save

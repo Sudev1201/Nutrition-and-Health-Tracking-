@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { http, HttpResponse } from 'msw'
 import { MemoryRouter } from 'react-router-dom'
@@ -12,7 +12,14 @@ import { WeightScreen } from './WeightScreen'
 import type { WeightTrend } from './types'
 
 let posted: unknown = null
+let postedAll: unknown[] = []
 let deleted: string | null = null
+
+/** A calendar day `n` days before the browser's today. */
+function daysAgo(n: number): string {
+  const [year, month, day] = todayIso().split('-').map(Number)
+  return new Date(Date.UTC(year, month - 1, day - n)).toISOString().slice(0, 10)
+}
 
 function stubTrend(trend: WeightTrend) {
   server.use(http.get(apiUrl('/weight'), () => HttpResponse.json(trend)))
@@ -20,11 +27,13 @@ function stubTrend(trend: WeightTrend) {
 
 beforeEach(() => {
   posted = null
+  postedAll = []
   deleted = null
   server.use(
     http.get(apiUrl('/weight'), () => HttpResponse.json(WEIGHT_FIXTURE)),
     http.post(apiUrl('/weight'), async ({ request }) => {
       posted = await request.json()
+      postedAll.push(posted)
       return HttpResponse.json(WEIGHT_FIXTURE, { status: 201 })
     }),
     http.delete(apiUrl('/weight/:date'), ({ params }) => {
@@ -55,7 +64,9 @@ test('shows the trend from the real endpoint, with no demo banner', async () => 
   expect(screen.queryByRole('note')).not.toBeInTheDocument()
 })
 
-test('sends the weigh-in with its date, and clears the field once saved', async () => {
+// With no date the server records the user's own today, which a browser in
+// another timezone, or a screen left open past midnight, can disagree with.
+test('sends a weigh-in for today with no date, and clears the field once saved', async () => {
   renderScreen()
 
   const field = await screen.findByLabelText('Weight in kg')
@@ -63,8 +74,41 @@ test('sends the weigh-in with its date, and clears the field once saved', async 
   await userEvent.type(field, '74.0')
   await userEvent.click(screen.getByRole('button', { name: 'Save' }))
 
-  await waitFor(() => expect(posted).toEqual({ weight_kg: 74, date: todayIso() }))
+  await waitFor(() => expect(posted).toStrictEqual({ weight_kg: 74 }))
   await waitFor(() => expect(field).toHaveValue(''))
+})
+
+// A date that stuck after a back-dated save would make the next weigh-in
+// overwrite that day, and never read the trend.
+test('a back-dated weigh-in carries its date, and the form returns to today after it', async () => {
+  renderScreen()
+
+  const field = await screen.findByLabelText('Weight in kg')
+  const date = screen.getByLabelText('Date')
+  fireEvent.change(date, { target: { value: daysAgo(7) } })
+  await userEvent.type(field, '74.5')
+  await userEvent.click(screen.getByRole('button', { name: 'Save' }))
+
+  await waitFor(() => expect(postedAll).toStrictEqual([{ weight_kg: 74.5, date: daysAgo(7) }]))
+  await waitFor(() => expect(date).toHaveValue(todayIso()))
+
+  await userEvent.type(field, '74.1')
+  await userEvent.click(screen.getByRole('button', { name: 'Save' }))
+
+  await waitFor(() => expect(postedAll).toHaveLength(2))
+  expect(postedAll[1]).toStrictEqual({ weight_kg: 74.1 })
+})
+
+test('picking today again sends no date', async () => {
+  renderScreen()
+
+  const date = await screen.findByLabelText('Date')
+  fireEvent.change(date, { target: { value: daysAgo(3) } })
+  fireEvent.change(date, { target: { value: todayIso() } })
+  await userEvent.type(screen.getByLabelText('Weight in kg'), '74')
+  await userEvent.click(screen.getByRole('button', { name: 'Save' }))
+
+  await waitFor(() => expect(posted).toStrictEqual({ weight_kg: 74 }))
 })
 
 // The energy equations are weight-based: a typo would quietly skew every target.
@@ -72,8 +116,19 @@ test('will not save an implausible weight', async () => {
   renderScreen()
 
   await userEvent.type(await screen.findByLabelText('Weight in kg'), '7.4')
+  await userEvent.tab()
 
   expect(screen.getByRole('alert')).toHaveTextContent(/between 20 and 300/)
+  expect(screen.getByRole('button', { name: 'Save' })).toBeDisabled()
+})
+
+// "7" is on its way to "74": an error on the first keystroke is noise.
+test('says nothing about the range while the weight is still being typed', async () => {
+  renderScreen()
+
+  await userEvent.type(await screen.findByLabelText('Weight in kg'), '7')
+
+  expect(screen.queryByRole('alert')).not.toBeInTheDocument()
   expect(screen.getByRole('button', { name: 'Save' })).toBeDisabled()
 })
 

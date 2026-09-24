@@ -1,6 +1,5 @@
 import { useState } from 'react'
 import { formatDay } from '../lib/format'
-import { todayIso } from '../today/useToday'
 import { Button } from '../ui/Button'
 import { Card, CardTitle } from '../ui/Card'
 import { Checkbox } from '../ui/fields'
@@ -63,7 +62,7 @@ export function ScreeningCard({ saved }: { saved: Screening | null }) {
       <Button
         className="mt-3"
         disabled={save.isPending}
-        onClick={() => save.mutate({ ...answers, date: todayIso() })}
+        onClick={() => save.mutate(answers)}
       >
         Save answers
       </Button>
