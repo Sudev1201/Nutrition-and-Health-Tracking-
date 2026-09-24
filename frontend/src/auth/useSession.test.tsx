@@ -3,8 +3,9 @@ import { act, render, renderHook, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { http, HttpResponse } from 'msw'
 import type { ReactNode } from 'react'
-import { beforeEach, expect, test } from 'vitest'
+import { afterEach, beforeEach, expect, test } from 'vitest'
 import { apiUrl } from '../mocks/apiUrl'
+import { ENDPOINT, installPush, uninstallPush } from '../mocks/pushApis'
 import { server } from '../mocks/server'
 import { RequireAuth } from './RequireAuth'
 import { useSignIn, useSignOut } from './useSession'
@@ -47,6 +48,8 @@ beforeEach(() => {
     http.post(apiUrl('/auth/google'), () => HttpResponse.json(B)),
   )
 })
+
+afterEach(() => uninstallPush())
 
 test('signing out forgets the session and every other account data cached', async () => {
   signedInAsA()
@@ -91,4 +94,64 @@ test('signing out still shows the sign-in screen', async () => {
 
   expect(await screen.findByRole('heading', { name: 'Nutrient Tracker' })).toBeInTheDocument()
   expect(queryClient.getQueryData(['weight'])).toBeUndefined()
+})
+
+/** Records the calls sign-out makes, in order, with the device's DELETE answering `status`. */
+function serveSignOut(status = 204) {
+  const calls: string[] = []
+  server.use(
+    http.delete(apiUrl('/push/subscriptions'), async ({ request }) => {
+      const { endpoint } = (await request.json()) as { endpoint: string }
+      calls.push(`forget ${endpoint}`)
+      return new HttpResponse(null, { status })
+    }),
+    http.post(apiUrl('/auth/logout'), () => {
+      calls.push('logout')
+      return new HttpResponse(null, { status: 204 })
+    }),
+  )
+  return calls
+}
+
+/** A signs out on a browser that has said something about push. */
+async function signOutWithPush() {
+  signedInAsA()
+  queryClient.setQueryData(['push', 'device'], 'on')
+  const { result } = renderHook(() => useSignOut(), { wrapper })
+
+  await act(() => result.current.mutateAsync())
+}
+
+// The DELETE needs the session, and a shared phone must not go on reminding the
+// person who just left it.
+test('signing out forgets this device first, while the session still exists', async () => {
+  const push = installPush({ permission: 'granted', subscribed: true })
+  const calls = serveSignOut()
+
+  await signOutWithPush()
+
+  expect(calls).toEqual([`forget ${ENDPOINT}`, 'logout'])
+  expect(push.subscription.unsubscribe).toHaveBeenCalledOnce()
+  expect(queryClient.getQueryData(['session'])).toBeNull()
+  // What this browser said about push went with everything else of A's.
+  expect(cachedKeys()).toEqual([['session']])
+})
+
+test('a device the server cannot forget does not keep anyone signed in', async () => {
+  installPush({ permission: 'granted', subscribed: true })
+  const calls = serveSignOut(500)
+
+  await signOutWithPush()
+
+  expect(calls).toEqual([`forget ${ENDPOINT}`, 'logout'])
+  expect(queryClient.getQueryData(['session'])).toBeNull()
+})
+
+test('a browser without push simply signs out', async () => {
+  const calls = serveSignOut()
+
+  await signOutWithPush()
+
+  expect(calls).toEqual(['logout'])
+  expect(queryClient.getQueryData(['session'])).toBeNull()
 })

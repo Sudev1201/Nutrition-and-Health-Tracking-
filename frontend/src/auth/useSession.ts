@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { ApiError, api } from '../lib/api'
+import { unsubscribeThisDevice } from '../settings/usePush'
 
 export interface SessionUser {
   id: string
@@ -51,11 +52,20 @@ export function useSignIn() {
 export function useSignOut() {
   const queryClient = useQueryClient()
   return useMutation({
-    mutationFn: () => api.post('/auth/logout', {}),
+    mutationFn: async () => {
+      // This device first, while there is still a session to forget it with: the
+      // logout call takes no user. Otherwise whoever signs in next on this phone
+      // would get this user's reminders. It never throws, so a failure there
+      // cannot keep anyone signed in.
+      await unsubscribeThisDevice()
+      await api.post('/auth/logout', {})
+    },
     onSuccess: () => {
       // The session first, so RequireAuth unmounts the screens; clearing the cache
       // before this leaves them subscribed to removed queries, and sign-out stalls.
       queryClient.setQueryData(['session'], null)
+      // Everything else belongs to the user who just left, what this browser
+      // said about push included.
       queryClient.removeQueries(notSession)
     },
   })

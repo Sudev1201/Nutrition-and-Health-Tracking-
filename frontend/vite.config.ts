@@ -49,6 +49,11 @@ export default defineConfig({
         // API responses are never precached -- stale nutrient targets would be
         // worse than an honest offline state.
         navigateFallbackDenylist: [/^\/auth/, /^\/households/, /^\/foods/],
+        // The meal reminders' push and notification-click handlers: plain JS in
+        // public/, loaded into the generated worker, which stays generateSW. The
+        // file is precached too, so an edit to it changes sw.js and updates the
+        // worker.
+        importScripts: ['push-handlers.js'],
       },
     }),
   ],

@@ -66,7 +66,6 @@ export const CYCLE_FIXTURE: CycleState = {
 }
 
 export const REMINDERS_FIXTURE: ReminderSettings = {
-  push_granted: false,
   slots: [
     { slot: 'breakfast', time: '08:00', weekend_time: '09:30', reminder_on: true },
     { slot: 'snack1', time: '11:00', weekend_time: null, reminder_on: false },
@@ -74,4 +73,5 @@ export const REMINDERS_FIXTURE: ReminderSettings = {
     { slot: 'snack2', time: '17:00', weekend_time: null, reminder_on: true },
     { slot: 'dinner', time: '20:30', weekend_time: null, reminder_on: true },
   ],
+  devices: 0,
 }
