@@ -12,6 +12,7 @@ depend on the body in front of us rather than on a reference adult.
 from dataclasses import dataclass
 
 from app.nutrition_core.energy import Body, energy_target
+from app.nutrition_core.recalibration import recalibrated_energy
 
 # ICMR: 0.83 g/kg/day, or 1 g/kg for a cereal-based diet with low-quality
 # protein — a rice-dominant diet without adequate pulses and milk.
@@ -36,6 +37,11 @@ KCAL_PER_G_FAT = 9.0
 # shortfall, and neither is a day with little saturated fat.
 CEILING_NUTRIENTS = frozenset({"sodium", "saturated_fat", "free_sugar", "cholesterol"})
 
+# Energy-scaled by ICMR's own method, and stored per activity level. When a
+# weight-driven recalibration moves the calorie target these move with it, by the
+# same ratio; with no recalibration the ratio is exactly 1.
+ENERGY_SCALED_REFERENCES = frozenset({"thiamine", "riboflavin", "niacin", "vitamin_b6"})
+
 
 @dataclass(frozen=True)
 class ReferenceValue:
@@ -44,6 +50,9 @@ class ReferenceValue:
     ear: float | None
     rda: float | None
     ai: float | None
+    # The framework the row comes from ("ICMR-NIN-2020", "IOM", ...). Carried so a
+    # target taken from outside ICMR can say so rather than pass as ICMR's.
+    source: str | None = None
 
 
 @dataclass(frozen=True)
@@ -66,9 +75,19 @@ def build_targets(
     cereal_dominant: bool,
     references: dict[str, ReferenceValue],
     upper_limits: dict[str, float],
+    *,
+    energy_offset_kcal: float = 0.0,
 ) -> dict[str, Target]:
-    """Base targets, before any condition overlay or ledger adjustment."""
-    energy = energy_target(body, goal=goal, pace=pace)
+    """Base targets, before any condition overlay or ledger adjustment.
+
+    `energy_offset_kcal` is the weight-driven recalibration in force, if any. It
+    moves the energy target -- bounded and floored in `recalibrated_energy` -- and
+    through it the macros, fibre and the energy-scaled B vitamins. Protein does
+    not follow it: protein is per kilogram of the weight the body actually has.
+    """
+    formula = energy_target(body, goal=goal, pace=pace)
+    energy = recalibrated_energy(body, formula, energy_offset_kcal)
+    energy_scale = energy / formula
 
     def make(code: str, rda: float, ear: float | None = None) -> Target:
         return Target(
@@ -120,6 +139,11 @@ def build_targets(
             # honest, whereas a zero would read as a shortfall every day.
             continue
 
-        targets[code] = make(code, figure, ear=reference.ear)
+        ear = reference.ear
+        if code in ENERGY_SCALED_REFERENCES:
+            figure *= energy_scale
+            ear = ear * energy_scale if ear is not None else None
+
+        targets[code] = make(code, figure, ear=ear)
 
     return targets

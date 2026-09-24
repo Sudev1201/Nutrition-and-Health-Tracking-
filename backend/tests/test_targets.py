@@ -141,3 +141,68 @@ def test_a_reference_row_that_is_absent_produces_no_target():
     )
 
     assert "iron" not in targets
+
+
+"""
+A weight-driven recalibration moves the energy target, and with it everything
+ICMR derives from energy: the macros, fibre, and the four B vitamins stored per
+activity level. It must not move protein, which is per kilogram of the weight
+the body actually has, nor the RDA-anchored micronutrients.
+"""
+
+
+def recalibrated(offset: float, body: Body = MAN):
+    return build_targets(
+        body,
+        goal="maintain",
+        pace=None,
+        cereal_dominant=False,
+        references=REFERENCES,
+        upper_limits=UPPER_LIMITS,
+        energy_offset_kcal=offset,
+    )
+
+
+def test_without_an_offset_every_target_is_exactly_what_it_was():
+    assert recalibrated(0.0) == targets_for(MAN)
+
+
+def test_an_offset_moves_the_energy_target():
+    formula = targets_for(MAN)["energy"].rda
+    assert recalibrated(-200.0)["energy"].rda == pytest.approx(formula - 200.0)
+
+
+def test_the_macros_and_fibre_follow_the_recalibrated_energy():
+    moved = recalibrated(-200.0)
+    energy = moved["energy"].rda
+
+    assert moved["fibre"].rda == pytest.approx(energy / 2000.0 * 30.0)
+    assert moved["fat"].rda == pytest.approx(energy * 0.25 / 9.0)
+    assert moved["saturated_fat"].rda == pytest.approx(energy * 0.10 / 9.0)
+
+
+def test_the_energy_scaled_b_vitamins_follow_it_by_the_same_ratio():
+    base, moved = targets_for(MAN), recalibrated(-200.0)
+    ratio = moved["energy"].rda / base["energy"].rda
+
+    assert moved["thiamine"].rda == pytest.approx(1.4 * ratio)
+    assert moved["thiamine"].ear == pytest.approx(1.2 * ratio)
+
+
+def test_protein_and_the_rda_anchored_micronutrients_do_not_move():
+    base, moved = targets_for(MAN), recalibrated(-200.0)
+
+    assert moved["protein"] == base["protein"]
+    assert moved["calcium"] == base["calcium"]
+    assert moved["iron"] == base["iron"]
+    assert moved["vitamin_b12"] == base["vitamin_b12"]
+
+
+def test_an_offset_beyond_the_bound_is_held_to_ten_percent():
+    formula = targets_for(MAN)["energy"].rda
+    assert recalibrated(-900.0)["energy"].rda == pytest.approx(formula * 0.9)
+
+
+def test_a_reference_row_carries_its_source():
+    assert ReferenceValue(ear=5, rda=8, ai=None, source="IOM").source == "IOM"
+    assert ReferenceValue(ear=5, rda=8, ai=None).source is None
