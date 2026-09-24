@@ -12,7 +12,7 @@ import type { TodayTargets } from '../../today/types'
  *  - a levothyroxine timing note
  *
  * Figures are plausible ICMR-NIN reference values for an adult man, but they are
- * fixtures — the screen carries a DemoDataBanner saying so.
+ * fixtures.
  */
 export const TODAY_FIXTURE: TodayTargets = {
   date: '2026-08-17',

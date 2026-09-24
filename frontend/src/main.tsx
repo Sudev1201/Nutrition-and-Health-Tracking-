@@ -9,9 +9,10 @@ const queryClient = new QueryClient()
 
 /**
  * Mocks are on in dev by default and off in a production build. Set
- * `VITE_USE_MOCKS=false` to run dev against a fully real backend, or `true` to
- * build a self-contained demo. The import is dynamic so MSW is tree-shaken out of
- * the production bundle entirely rather than shipped and skipped.
+ * `VITE_USE_MOCKS=false` to run dev with no worker at all. With no fixture
+ * handlers left, the worker serves only opt-in demo auth (`VITE_DEMO_AUTH=true`).
+ * The import is dynamic so MSW is tree-shaken out of the production bundle
+ * entirely rather than shipped and skipped.
  */
 async function startMocks(): Promise<void> {
   const flag = import.meta.env.VITE_USE_MOCKS

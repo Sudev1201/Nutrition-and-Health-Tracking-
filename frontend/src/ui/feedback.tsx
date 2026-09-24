@@ -29,21 +29,3 @@ export function Skeleton({ className }: { className?: string }) {
     />
   )
 }
-
-/**
- * Marks a screen whose numbers come from fixtures rather than from the nutrition
- * engine. This is a health app: a plausible-looking calcium target that was typed
- * by hand must never be mistaken for one computed from ICMR-NIN figures. Removed
- * per screen as its endpoint lands.
- */
-export function DemoDataBanner({ endpoint }: { endpoint: string }) {
-  return (
-    <div
-      role="note"
-      className="mb-4 rounded-card border border-carried/40 bg-carried/10 px-3 py-2 text-xs text-carried"
-    >
-      <strong className="font-medium">Demo data.</strong> These numbers are fixtures,
-      not computed from your profile — <code>{endpoint}</code> is not built yet.
-    </div>
-  )
-}

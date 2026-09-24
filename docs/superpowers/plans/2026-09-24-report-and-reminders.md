@@ -34,6 +34,9 @@
 
 The HTTP contracts are `frontend/src/report/types.ts` and `frontend/src/settings/types.ts`, and both are amended here where the proposal could not express the spec.
 
+**Status:** Complete. 881 backend tests and 334 frontend tests passing, plus 9 Playwright
+end-to-end tests against the real backend and Postgres; `ruff`, `alembic check`, `tsc -b`,
+`oxlint` and `vite build` clean.
 
 ## Global Constraints
 
@@ -12531,11 +12534,14 @@ Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>"
 - **A day logged only with foods that have no nutrient rows reads as untracked**, although the diary has an entry.
 - **Only sodium's lowered ceiling is explained on Today.** Saturated fat, free sugar and cholesterol render as `StatTile`s, which show no carry, and so does a lowered energy target.
 - **The "Lowered by" note can overstate the drop.** It prints the raw negative carry, while `effective_target` clamps at the EAR.
+- **A salty day's lowering can chain past two days.** A surplus is measured against the already-lowered ceiling (the spec's delta = consumed - effective target, the same rule shortfalls follow), so a day under the base ceiling but over the lowered one counts as over the limit and carries a little further, bounded by the 30% cap per source day. Measuring a ceiling's surplus against its base ceiling would stop it.
+- **The Report screen's Next stops at the browser's current week**, so a browser whose clock is behind the account's timezone cannot reach the server's week in progress; the household card mirrors this.
 
 **The planner**
 - **The planner's emphasis is invisible.** `WeekPlanOut` does not carry it, so the Plan screen cannot say it is leaning on calcium because of last week.
 - **Suggestions ignore oxalate.** A calcium suggestion can name a dish whose calcium comes from high-oxalate greens. The ingredient's `oxalate_class` is not used yet.
 - **Suggested dishes ignore what else they carry.** On warfarin, a calcium or fibre suggestion can name a greens dish rich in vitamin K, and the next plan's calcium emphasis can lean the same way. Vitamin K has no `rda_reference` row, so it has no target. That leaves nothing to filter a dish against, and it also leaves the planner's hold-steady penalty inert in production: `_hold_steady_penalty` finds no vitamin K goal. Seeding a sourced vitamin K reference would allow both a report filter and a working penalty. The filter would drop dishes whose default portion alone moves vitamin K by more than `HOLD_STEADY_TOLERANCE` of its goal. Potassium needs no such filter: on a potassium-sparing drug it keeps its base AI, and the planner fills that AI itself.
+- **Asking for next week's plan mid-week freezes a partial-week emphasis until a regenerate.** The emphasis is read from the week before the plan's, which has not finished yet; the screen only asks for the current week.
 
 **Households**
 - **Daily progress is not shared.** The spec shares "daily and weekly nutrition progress — whether each member hit their targets". The household sees only the week's counts: days logged, and nutrient-days on track out of those measured. They cover finished days only, so the card never shows whether anyone hit their targets on a particular day. Today reaches the household only once it is over, so on a Sunday the card reads zero for everyone. The sharing switch still says "Share my daily progress with the household".
@@ -12547,6 +12553,7 @@ Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>"
 - **A session that ends without a sign-out leaves the device subscribed** to the previous account. That covers cookie expiry and cleared cookies. The screen reads it as "on" for whoever signs in next.
 - **A subscription under an old VAPID key pair reads as on but is never reminded.** Turning it off and on again fixes it.
 - **Push cannot be exercised by the e2e walks.** The dev server registers no service worker. Manual spec step 16 needs a production build and VAPID keys.
+- **`pywebpush` brings `aiohttp` and six small packages into the lock file.**
 
 **Pre-existing gaps**
 - **Concurrent double submits can answer 500** on the unique constraints of check-then-insert upserts: weigh-ins, cycle settings and reminder rows.

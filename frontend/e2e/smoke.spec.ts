@@ -23,6 +23,10 @@ import { expect, test } from '@playwright/test'
  *    weigh-in the same day replaces it.
  *  - Cycle tracking gated on the profile, and a heavy-bleeding answer producing a
  *    referral rather than a changed target.
+ *  - The weekly report on the real week walk: last week opens first, an empty week
+ *    says so, and the week in progress is as far as it goes.
+ *  - Meal reminders on the real settings endpoint: a slot switched off stays off
+ *    across a reload, and the mid-morning snack starts off.
  */
 
 const SEARCH_DEBOUNCE_MS = 400
@@ -280,5 +284,54 @@ test.describe('the tracking loop', () => {
     await page.getByRole('checkbox', { name: /soak through a pad/i }).check()
     await page.getByRole('button', { name: 'Save answers' }).click()
     await expect(page.getByRole('alert')).toContainText(/please see a clinician/i)
+  })
+
+  test('the report opens on the last complete week and steps between weeks', async ({ page }) => {
+    await page.goto('/report')
+
+    // The e2e user was reset at the start of the run, so last week has nothing in it:
+    // the report says so rather than drawing a week of zeros.
+    const range = page.getByRole('heading', { level: 2 })
+    await expect(range).toBeVisible()
+    const lastWeek = (await range.textContent()) ?? ''
+    await expect(page.getByText('Nothing was logged this week')).toBeVisible()
+    await expect(page.getByRole('note')).toHaveCount(0)
+
+    // Back one week, and forward again to where it started.
+    await page.getByRole('button', { name: 'Previous week' }).click()
+    await expect(range).not.toHaveText(lastWeek)
+    await page.getByRole('button', { name: 'Next week' }).click()
+    await expect(range).toHaveText(lastWeek)
+
+    // Forward once more is the week in progress, and no further.
+    await page.getByRole('button', { name: 'Next week' }).click()
+    await expect(page.getByText('In progress')).toBeVisible()
+    await expect(page.getByRole('button', { name: 'Next week' })).toBeDisabled()
+    await expect(page.getByRole('alert')).toHaveCount(0)
+  })
+
+  test('a meal reminder can be switched off, and stays off', async ({ page }) => {
+    await page.goto('/reminders')
+    await expect(page.getByRole('note')).toHaveCount(0)
+
+    // The dev server registers no service worker, so this page cannot subscribe the
+    // browser -- but the per-slot settings are the real API either way.
+    const dinner = page.getByRole('switch', { name: /dinner · 20:30/i })
+    await expect(dinner).toBeChecked()
+
+    const saved = page.waitForResponse(
+      (response) =>
+        response.request().method() === 'PATCH' && response.url().includes('/settings/reminders'),
+    )
+    await dinner.click()
+    expect((await saved).ok()).toBe(true)
+    await expect(dinner).not.toBeChecked()
+
+    // A reload reads it back from the server, not from this page's cache.
+    await page.reload()
+    await expect(page.getByRole('switch', { name: /dinner · 20:30/i })).not.toBeChecked()
+
+    // The mid-morning snack reminds nobody by default.
+    await expect(page.getByRole('switch', { name: /mid-morning snack|snack 1/i })).not.toBeChecked()
   })
 })

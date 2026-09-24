@@ -39,6 +39,11 @@ MIN_TREND_SPAN_DAYS = 14
 # (last - first) / 2, so one water-heavy morning as the newest weigh-in decides a
 # reading on its own; the next weigh-in either dilutes it or confirms a real trend.
 # Weighing weekly, a step therefore needs four weigh-ins across three weeks.
+# A single blip cannot step on its own as the newest weigh-in: the next one dilutes
+# it. It can still move a step as the OLDEST point of a fresh window -- the onboarding
+# weigh-in, a step's own date, or the first weigh-in after a goal change -- once it is
+# off by more than ~0.83 kg (0.25 / 0.3, the four-point slope's weight on its first
+# point). Recorded as a known gap.
 DRIFT_TOLERANCE_KG_PER_WEEK = 0.25
 
 # 1 kg/week of drift is ~1,100 kcal/day of imbalance. Half of it is corrected per

@@ -12,7 +12,7 @@ npm install
 npm run dev
 ```
 
-Every screen but Report and Reminders talks to the real FastAPI backend on
+Every screen talks to the real FastAPI backend on
 `VITE_API_BASE` (default `http://localhost:8000`), which needs Postgres running:
 
 ```bash
@@ -20,33 +20,34 @@ docker compose up -d db          # from the repo root
 cd backend && uv run alembic upgrade head && uv run uvicorn app.main:app --reload
 ```
 
-### Without a backend
+### Without a Google OAuth client
 
-Report and Reminders are not wired to a backend yet (see below), and the ones that are need
-Postgres and a Google OAuth client. To walk the whole app without either:
+Every screen needs the backend and Postgres (see above). Demo auth gets you past the sign-in
+screen without Google:
 
 ```bash
 VITE_DEMO_AUTH=true npm run dev
 ```
 
-This mocks `/auth/*` so you land straight in the app. **Never enable it in a deployed build** —
-it hands a session to anyone who asks.
+This fakes `/auth/*` in the browser only. The backend still has no session, so every other
+request answers 401: you get the shell and each screen's error state, not your data. The
+end-to-end walk gets a real session a different way, through `backend/scripts/e2e_session.py`
+(see "End to end"). **Never enable demo auth in a deployed build.** It hands a session to
+anyone who asks.
 
 ## Which screens are real
 
-**Live against the real backend:** sign-in, household, food search, the onboarding
-questionnaire and profile, Today (real ICMR-NIN targets and the compensation ledger),
-meal logging, the meal plan (generation, swap, lock, regenerate, and the household
-cooking view), weight (weigh-ins, the trend and calorie recalibration) and cycle
-tracking.
+**Live against the real backend:** every screen. That covers sign-in, household (with the
+week's shared progress), food search, the onboarding questionnaire and profile, Today, meal
+logging, the meal plan, weight, cycle tracking, the weekly report and reminders.
 
-**Still on MSW fixtures:** Report and Reminders. Each carries a **Demo data** banner
-naming the endpoint it is waiting for. Those handlers and the `types.ts` in each
-feature folder are the proposed contract for the remaining backend plans.
+**Push reminders need a production build.** The browser subscribes only under the production
+service worker (`npm run build && npm run preview`), and the backend sends only with VAPID keys
+set and `SCHEDULER_ENABLED=true`. See `backend/.env.example`.
 
-Mocks are on in dev and off in a production build. Override with `VITE_USE_MOCKS=false` (dev
-against a fully real backend) or `true` (a self-contained demo build). MSW is dynamically
-imported, so it is not in the production bundle.
+Mocks are on in dev and off in a production build. No fixture handlers are left, so the mock
+worker serves only opt-in demo auth. Override with `VITE_USE_MOCKS=false` (no worker at all) or
+`true`. MSW is dynamically imported, so it is not in the production bundle.
 
 MSW's service worker and the PWA service worker both claim the root scope, so they never run
 together: mocks own dev, the PWA worker owns the production build.
@@ -83,7 +84,7 @@ project references and will miss errors.
 ### End to end
 
 ```bash
-npm run test:e2e   # Playwright: onboarding -> log -> dashboard, then the plan, weight and cycle
+npm run test:e2e   # Playwright: onboarding -> log -> dashboard, then the plan, weight, cycle, report and reminders
 ```
 
 Deliberately against the **real** backend and a real Postgres, never against MSW — run against
