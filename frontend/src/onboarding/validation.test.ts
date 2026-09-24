@@ -109,3 +109,35 @@ test('hypothyroidism with hyperthyroidism is a conflict', () => {
 test('ordinary combinations are not conflicts', () => {
   expect(hasConditionConflict(['type2_diabetes', 'high_cholesterol'])).toBe(false)
 })
+
+// ICMR's 29 mg iron figure for women averages menstrual loss; after menopause a
+// different figure applies. So a woman is asked, and a man is not.
+test('a woman is asked whether she still has periods', () => {
+  expect(
+    validateStep(
+      'about',
+      answers({ sex: 'female', age: '52', weight_kg: '60', activity: 'moderate' }),
+    ),
+  ).toMatch(/periods/i)
+})
+
+test('a woman who answers it may continue', () => {
+  expect(
+    validateStep(
+      'about',
+      answers({
+        sex: 'female',
+        age: '52',
+        weight_kg: '60',
+        activity: 'moderate',
+        menstrual_status: 'postmenopausal',
+      }),
+    ),
+  ).toBeNull()
+})
+
+test('a man is not asked about periods', () => {
+  expect(
+    validateStep('about', answers({ sex: 'male', age: '34', weight_kg: '74.2', activity: 'moderate' })),
+  ).toBeNull()
+})

@@ -13,6 +13,7 @@ import { DEFAULT_MEAL_TIMES, emptyAnswers } from './validation'
 /** `GET /profile` — the saved answers, or null when onboarding is not done. */
 export interface SavedProfile {
   sex: OnboardingAnswers['sex']
+  menstrual_status: OnboardingAnswers['menstrual_status']
   age: number
   weight_kg: number
   activity: OnboardingAnswers['activity']
@@ -65,6 +66,7 @@ export function answersFromProfile(profile: SavedProfile): OnboardingAnswers {
   return {
     ...emptyAnswers(),
     sex: profile.sex,
+    menstrual_status: profile.menstrual_status ?? null,
     age: String(profile.age),
     weight_kg: String(profile.weight_kg),
     activity: profile.activity,

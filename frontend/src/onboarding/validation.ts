@@ -53,6 +53,7 @@ export const DEFAULT_MEAL_TIMES: Record<MealSlot, string> = {
 export function emptyAnswers(): OnboardingAnswers {
   return {
     sex: null,
+    menstrual_status: null,
     age: '',
     weight_kg: '',
     activity: null,
@@ -104,6 +105,9 @@ export function validateStep(step: StepId, answers: OnboardingAnswers): string |
   switch (step) {
     case 'about': {
       if (answers.sex === null) return 'Please choose an option, so the right reference values are used.'
+      if (answers.sex === 'female' && answers.menstrual_status === null) {
+        return 'Please say whether you still have periods — it decides which iron figure applies.'
+      }
       if (!numberIn(answers.age, 1, 120)) return 'Please give an age between 1 and 120.'
       // Energy is computed from weight, so a typo here quietly skews every target.
       if (!numberIn(answers.weight_kg, 20, 300)) return 'Please give a weight in kg between 20 and 300.'

@@ -11,7 +11,9 @@ import { todayIso, useDiary, useTodayTargets } from './useToday'
 import type { NutrientProgress, TodayWarning } from './types'
 
 function WarningNote({ warning }: { warning: TodayWarning }) {
-  const conflict = warning.kind === 'condition-conflict'
+  // Both need acting on rather than noting: a conflict goes to a clinician, and
+  // iron near its limit after menopause has no route out of the body.
+  const conflict = warning.kind === 'condition-conflict' || warning.kind === 'approaching-limit'
   const Icon = conflict ? AlertTriangle : Info
 
   return (
@@ -98,8 +100,8 @@ export function TodayScreen() {
 
       {warnings.length > 0 && (
         <ul className="mb-4 space-y-2">
-          {warnings.map((warning) => (
-            <WarningNote key={warning.kind} warning={warning} />
+          {warnings.map((warning, index) => (
+            <WarningNote key={`${warning.kind}-${index}`} warning={warning} />
           ))}
         </ul>
       )}

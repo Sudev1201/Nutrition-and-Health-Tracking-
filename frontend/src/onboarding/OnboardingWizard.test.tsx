@@ -135,3 +135,14 @@ test('will not advance with a medication that has no dose time', async () => {
 
   expect(screen.getByRole('alert')).toHaveTextContent(/time you take it/i)
 })
+
+test('asks about periods only once Female is chosen', async () => {
+  await renderWizard()
+
+  expect(screen.queryByLabelText(/still have periods/i)).not.toBeInTheDocument()
+  await userEvent.selectOptions(screen.getByLabelText('Sex'), 'female')
+  expect(screen.getByLabelText(/still have periods/i)).toBeInTheDocument()
+
+  await userEvent.selectOptions(screen.getByLabelText('Sex'), 'male')
+  expect(screen.queryByLabelText(/still have periods/i)).not.toBeInTheDocument()
+})

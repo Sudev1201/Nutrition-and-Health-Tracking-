@@ -2,9 +2,8 @@ import type { NutrientUnit } from '../lib/format'
 import type { NutrientKind } from '../lib/status'
 
 /**
- * PROPOSED CONTRACT for `GET /targets/today?date=` — implemented by plans 3-4.
- * The mock handler in `src/mocks/handlers/targets.ts` is the executable version
- * of this shape; when the backend lands, delete the handler, not these types.
+ * CONTRACT for `GET /targets/today?date=`. Implemented by the backend's
+ * `app/targets/router.py`.
  */
 export interface NutrientProgress {
   /** Matches `nutrients.code` in the backend. */
@@ -39,15 +38,20 @@ export interface NutrientProgress {
 }
 
 /**
- * `drug-interaction` is emitted by the backend today; it was missing here, so a
- * potassium-on-ACE-inhibitor or warfarin warning arrived as a kind the UI did
- * not know. `above-limit` is the one the backend never sends — it is a per-
- * nutrient status, not a day-level warning — and is kept out for that reason.
+ * Day-level notes from `resolve_day`. `above-limit` is not one of them — it is a
+ * per-nutrient status, not a day-level warning — and is kept out for that reason.
+ *
+ * - `calorie-recalibrated`: weigh-ins moved the energy target off the formula.
+ * - `reference-framework`: iron is the IOM figure after menopause, not ICMR's.
+ * - `approaching-limit`: after menopause, a day's iron is near the upper limit.
  */
 export type WarningKind =
   | 'condition-conflict'
   | 'medication-timing'
   | 'drug-interaction'
+  | 'calorie-recalibrated'
+  | 'reference-framework'
+  | 'approaching-limit'
 
 export interface TodayWarning {
   kind: WarningKind

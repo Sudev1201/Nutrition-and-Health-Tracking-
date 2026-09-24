@@ -192,3 +192,46 @@ test('offers to collect a usual day when there is not one yet', async () => {
 
   expect(await screen.findByRole('link', { name: /add a usual day/i })).toBeInTheDocument()
 })
+
+test('explains a recalibrated calorie target and a non-ICMR iron figure', async () => {
+  server.use(
+    http.get(apiUrl('/targets/today'), () =>
+      HttpResponse.json({
+        ...TODAY_FIXTURE,
+        warnings: [
+          {
+            kind: 'calorie-recalibrated',
+            message: 'Your calorie target is 210 kcal lower than the formula gives, because your weigh-ins have drifted from your goal. The Weight screen has the detail.',
+          },
+          {
+            kind: 'reference-framework',
+            message: 'Your iron target is 8 mg, the IOM figure for women after menopause.',
+          },
+        ],
+      }),
+    ),
+  )
+  renderScreen()
+
+  expect(await screen.findByText(/210 kcal lower than the formula/)).toBeInTheDocument()
+  expect(screen.getByText(/the IOM figure for women after menopause/)).toBeInTheDocument()
+})
+
+// Two warnings of one kind are two warnings, not one rendered twice under one key.
+test('shows every warning, even two of the same kind', async () => {
+  server.use(
+    http.get(apiUrl('/targets/today'), () =>
+      HttpResponse.json({
+        ...TODAY_FIXTURE,
+        warnings: [
+          { kind: 'drug-interaction', message: 'First interaction.' },
+          { kind: 'drug-interaction', message: 'Second interaction.' },
+        ],
+      }),
+    ),
+  )
+  renderScreen()
+
+  expect(await screen.findByText('First interaction.')).toBeInTheDocument()
+  expect(screen.getByText('Second interaction.')).toBeInTheDocument()
+})

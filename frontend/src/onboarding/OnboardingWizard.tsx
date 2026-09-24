@@ -40,6 +40,10 @@ function useSaveProfile() {
       queryClient.invalidateQueries({ queryKey: ['profile'] })
       // First targets are computed from the profile, so they change too.
       queryClient.invalidateQueries({ queryKey: ['targets'] })
+      // A changed weight is a weigh-in, and a changed goal resets a recalibration.
+      queryClient.invalidateQueries({ queryKey: ['weight'] })
+      // Sex and menstrual status decide whether cycle tracking is offered at all.
+      queryClient.invalidateQueries({ queryKey: ['cycle'] })
     },
   })
 }

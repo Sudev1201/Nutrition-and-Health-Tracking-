@@ -7,7 +7,7 @@
  * one section you want to change.
  */
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { render, screen } from '@testing-library/react'
+import { render, screen, within } from '@testing-library/react'
 import { http, HttpResponse } from 'msw'
 import { MemoryRouter } from 'react-router-dom'
 import { beforeEach, expect, test } from 'vitest'
@@ -24,6 +24,7 @@ const PROFILE = {
   pace: 'gentle',
   diet_type: 'eggetarian',
   cereal_dominant: true,
+  menstrual_status: 'postmenopausal',
   conditions: ['hypothyroidism'],
   medications: [{ name: 'Levothyroxine', time: '06:30' }],
   meal_times: [
@@ -140,4 +141,12 @@ test('a real failure says so rather than rendering an empty profile', async () =
   renderScreen()
 
   expect(await screen.findByRole('alert')).toBeInTheDocument()
+})
+
+test('shows whether a woman still has periods', async () => {
+  renderScreen()
+
+  const about = await screen.findByRole('region', { name: 'About you' })
+  expect(within(about).getByText('Periods')).toBeInTheDocument()
+  expect(within(about).getByText(/past menopause/i)).toBeInTheDocument()
 })

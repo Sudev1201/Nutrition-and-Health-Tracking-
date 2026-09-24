@@ -11,10 +11,19 @@ import {
   CONDITION_LABELS,
   DIET_LABELS,
   GOAL_LABELS,
+  MENSTRUAL_STATUS_LABELS,
   PACE_LABELS,
   SEX_LABELS,
 } from '../onboarding/types'
-import type { ActivityLevel, ConditionCode, DietType, Goal, Pace, Sex } from '../onboarding/types'
+import type {
+  ActivityLevel,
+  ConditionCode,
+  DietType,
+  Goal,
+  MenstrualStatus,
+  Pace,
+  Sex,
+} from '../onboarding/types'
 import { STEP_TITLES, hasConditionConflict } from '../onboarding/validation'
 import type { StepId } from '../onboarding/validation'
 import { Badge } from '../ui/Badge'
@@ -135,6 +144,15 @@ export function ProfileScreen() {
             <SummaryRow label="Sex">
               {data.sex === null ? <NotSet /> : SEX_LABELS[data.sex as Sex]}
             </SummaryRow>
+            {data.sex === 'female' && (
+              <SummaryRow label="Periods">
+                {data.menstrual_status === null ? (
+                  <NotSet />
+                ) : (
+                  MENSTRUAL_STATUS_LABELS[data.menstrual_status as MenstrualStatus]
+                )}
+              </SummaryRow>
+            )}
             <SummaryRow label="Age">{data.age} years</SummaryRow>
             {/*
               Weight but no height, deliberately: the ICMR energy equations are

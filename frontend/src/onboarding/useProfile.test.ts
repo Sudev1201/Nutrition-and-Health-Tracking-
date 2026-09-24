@@ -34,6 +34,7 @@ function savedProfile(overrides: Partial<SavedProfile> = {}): SavedProfile {
     pace: null,
     diet_type: 'vegetarian',
     cereal_dominant: false,
+    menstrual_status: null,
     conditions: [],
     medications: [],
     meal_times: [],
@@ -75,4 +76,13 @@ test('a profile with no observances still yields an empty list, not undefined', 
   const answers = answersFromProfile(savedProfile())
 
   expect(answers.observances).toEqual([])
+})
+
+// Carried explicitly: PUT /profile replaces rather than merges, so a status left
+// out here would be wiped by the next save of any other section.
+test('the menstrual status is carried into the wizard state', () => {
+  const answers = answersFromProfile(
+    savedProfile({ sex: 'female', menstrual_status: 'postmenopausal' }),
+  )
+  expect(answers.menstrual_status).toBe('postmenopausal')
 })

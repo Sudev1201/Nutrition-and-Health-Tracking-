@@ -15,6 +15,13 @@ export type Goal = 'lose' | 'maintain' | 'gain'
 export type Pace = 'gentle' | 'steady'
 export type DietType = 'vegetarian' | 'eggetarian' | 'fishetarian' | 'non-vegetarian'
 
+/**
+ * Asked of women only. ICMR's 29 mg iron figure for women averages menstrual
+ * loss; ICMR publishes no postmenopausal category, so after menopause the IOM
+ * figure applies instead, with a note on Today saying so.
+ */
+export type MenstrualStatus = 'menstruating' | 'postmenopausal'
+
 export type ConditionCode =
   | 'type2_diabetes'
   | 'prediabetes'
@@ -49,6 +56,11 @@ export const CONDITION_LABELS: Record<ConditionCode, string> = {
 export const SEX_LABELS: Record<Sex, string> = {
   female: 'Female',
   male: 'Male',
+}
+
+export const MENSTRUAL_STATUS_LABELS: Record<MenstrualStatus, string> = {
+  menstruating: 'Yes, I have periods',
+  postmenopausal: 'No, I am past menopause',
 }
 
 export const ACTIVITY_LABELS: Record<ActivityLevel, string> = {
@@ -135,6 +147,8 @@ export interface MealTimeAnswer {
 
 export interface OnboardingAnswers {
   sex: Sex | null
+  /** Null for a man, and until a woman answers. */
+  menstrual_status: MenstrualStatus | null
   age: string
   weight_kg: string
   activity: ActivityLevel | null

@@ -9,6 +9,7 @@ import {
   CONDITION_LABELS,
   DIET_LABELS,
   GOAL_LABELS,
+  MENSTRUAL_STATUS_LABELS,
   PACE_HINTS,
   PACE_LABELS,
   SEX_LABELS,
@@ -18,6 +19,7 @@ import type {
   ConditionCode,
   DietType,
   Goal,
+  MenstrualStatus,
   OnboardingAnswers,
   Pace,
   Sex,
@@ -39,7 +41,12 @@ export function AboutStep({ answers, update }: StepProps) {
           <Select
             {...props}
             value={answers.sex ?? ''}
-            onChange={(event) => update({ sex: event.target.value as Sex })}
+            onChange={(event) => {
+              const sex = event.target.value as Sex
+              // A status only means something on a woman's profile; leaving one
+              // behind would come back if the profile were switched again.
+              update({ sex, menstrual_status: sex === 'female' ? answers.menstrual_status : null })
+            }}
           >
             <option value="" disabled>
               Choose…
@@ -52,6 +59,32 @@ export function AboutStep({ answers, update }: StepProps) {
           </Select>
         )}
       </Field>
+
+      {answers.sex === 'female' && (
+        <Field
+          label="Do you still have periods?"
+          hint="ICMR’s iron figure for women averages menstrual loss. After menopause a lower figure applies."
+        >
+          {(props) => (
+            <Select
+              {...props}
+              value={answers.menstrual_status ?? ''}
+              onChange={(event) =>
+                update({ menstrual_status: event.target.value as MenstrualStatus })
+              }
+            >
+              <option value="" disabled>
+                Choose…
+              </option>
+              {Object.entries(MENSTRUAL_STATUS_LABELS).map(([value, label]) => (
+                <option key={value} value={value}>
+                  {label}
+                </option>
+              ))}
+            </Select>
+          )}
+        </Field>
+      )}
 
       <Field label="Age">
         {(props) => (
