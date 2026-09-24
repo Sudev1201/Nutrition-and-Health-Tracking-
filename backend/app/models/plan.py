@@ -28,6 +28,11 @@ class MealPlan(TimestampedBase):
     # one; keeping it means a plan can be reproduced exactly when a suggestion
     # needs explaining.
     seed: Mapped[int] = mapped_column(Integer)
+    # Space-separated nutrient codes the previous week's report suggested; the planner
+    # weighs them EMPHASIS_FACTOR more for this week. Empty string = none. Stored
+    # rather than recomputed, so a swap or a re-plan keeps the emphasis the week was
+    # generated with; only a regenerate recomputes it.
+    emphasis: Mapped[str] = mapped_column(String(200), default="", nullable=False)
 
 
 class MealPlanItem(TimestampedBase):

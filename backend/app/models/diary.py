@@ -1,7 +1,7 @@
 import datetime
 import uuid
 
-from sqlalchemy import Boolean, Date, Float, ForeignKey, String, UniqueConstraint
+from sqlalchemy import Boolean, Date, Float, ForeignKey, Index, String, UniqueConstraint
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -21,6 +21,9 @@ class MealLog(TimestampedBase):
     """
 
     __tablename__ = "meal_logs"
+    # The ledger walk, the weekly report and the reminder runner all read one user's
+    # entries on one date, many times over in a single request or tick.
+    __table_args__ = (Index("ix_meal_logs_user_day", "user_id", "logged_on"),)
 
     user_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), index=True

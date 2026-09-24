@@ -14,8 +14,9 @@ out already holding a valid cookie, exactly as it would after signing in.
 Usage:
     uv run python -m scripts.e2e_session [--reset]
 
-`--reset` deletes everything the user has logged, planned and answered, so a run
-starts from onboarding. It never touches any user but this one.
+`--reset` deletes everything the user has logged, planned, answered and
+subscribed, so a run starts from onboarding. It never touches any user but this
+one.
 """
 
 import argparse
@@ -40,6 +41,7 @@ from app.models.profile import (
     Profile,
     UsualIntakeItem,
 )
+from app.models.push import PushSubscription, ReminderDelivery
 from app.models.user import User
 from app.models.weight import CalorieAdjustment, WeightLog
 
@@ -50,7 +52,8 @@ E2E_EMAIL = "e2e@playwright.invalid"
 # Everything the walk writes. Each is keyed on user_id; meal_plan_items goes with
 # its plan through the foreign key's ON DELETE CASCADE. Missing a table here means
 # a second run starts from the first run's leftovers -- a weigh-in history that
-# grows every run, or cycle tracking already switched on.
+# grows every run, cycle tracking already switched on, or a device still
+# subscribed to the last run's reminders.
 OWNED_MODELS = (
     MealLog,
     MealSlotSkip,
@@ -61,6 +64,8 @@ OWNED_MODELS = (
     CycleSymptom,
     CycleScreening,
     CycleSettings,
+    ReminderDelivery,
+    PushSubscription,
     HealthCondition,
     Medication,
     MealSlotTime,

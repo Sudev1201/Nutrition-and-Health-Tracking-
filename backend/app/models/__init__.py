@@ -30,6 +30,7 @@ from app.models.profile import (
     Profile,
     UsualIntakeItem,
 )
+from app.models.push import PushSubscription, ReminderDelivery
 from app.models.reference import RdaReference, UpperLimit
 from app.models.user import User
 from app.models.weight import CalorieAdjustment, WeightLog
@@ -62,7 +63,9 @@ __all__ = [
     "ObservanceRule",
     "PortionMeasure",
     "Profile",
+    "PushSubscription",
     "RdaReference",
+    "ReminderDelivery",
     "UpperLimit",
     "User",
     "UsualIntakeItem",
