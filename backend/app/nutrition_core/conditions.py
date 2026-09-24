@@ -69,7 +69,9 @@ HYPERTENSION_POTASSIUM_MG = 4000.0
 
 @dataclass(frozen=True)
 class Warning:
-    kind: str  # condition-conflict | medication-timing | drug-interaction
+    # condition-conflict | medication-timing | drug-interaction, from the overlay;
+    # calorie-recalibrated | reference-framework | approaching-limit, from resolve_day.
+    kind: str
     message: str
 
 

@@ -14,6 +14,7 @@ from app.models.profile import (
     UsualIntakeItem,
 )
 from app.models.user import User
+from app.nutrition_core.energy import Body
 
 # Every child table of the profile, so a re-save clears them all.
 CHILD_MODELS = (
@@ -29,6 +30,16 @@ CHILD_MODELS = (
 
 def get_profile(db: Session, user: User) -> Profile | None:
     return db.scalars(select(Profile).where(Profile.user_id == user.id)).one_or_none()
+
+
+def body_of(profile: Profile) -> Body:
+    """The body the energy equations and protein are computed for."""
+    return Body(
+        sex=profile.sex,
+        age=profile.age,
+        weight_kg=profile.weight_kg,
+        activity=profile.activity,
+    )
 
 
 def get_conditions(db: Session, user: User) -> list[str]:

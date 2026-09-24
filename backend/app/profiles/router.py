@@ -1,6 +1,5 @@
 import datetime
 import uuid
-from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
@@ -8,6 +7,7 @@ from sqlalchemy.orm import Session
 
 from app.auth.deps import get_current_user
 from app.db import get_db
+from app.local_time import local_today
 from app.meal_slots import OPTIONAL_SLOTS, SLOTS
 from app.models.profile import AvoidedFood, FavouriteIngredient
 from app.models.user import User
@@ -151,17 +151,6 @@ def _hhmm(value) -> str:
     return value.strftime("%H:%M")
 
 
-def _today_for(user: User) -> datetime.date:
-    try:
-        zone = ZoneInfo(user.timezone)
-    except (ZoneInfoNotFoundError, ValueError):
-        # Unknown name, or one malformed enough to be rejected outright. A bad
-        # stored timezone should not break the request; UTC is a defensible last
-        # resort, and the client normally passes the date explicitly anyway.
-        zone = ZoneInfo("UTC")
-    return datetime.datetime.now(tz=zone).date()
-
-
 def _to_out(db: Session, user: User) -> ProfileOut:
     profile = service.get_profile(db, user)
     if profile is None:
@@ -296,7 +285,7 @@ def read_baseline(
     """What a usual day adds up to, against what the profile calls for."""
     # The day boundary is the user's, not the server's, so the fallback reads
     # their timezone rather than whatever the host happens to be set to.
-    result = baseline_service.compute(db, user, date or _today_for(user))
+    result = baseline_service.compute(db, user, date or local_today(user))
     if result is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Complete your profile first")
     return BaselineOut(

@@ -8,7 +8,6 @@ with what the engine decides. The engine itself never sees a Session.
 import datetime
 import random
 import uuid
-import zoneinfo
 from collections import Counter
 from collections.abc import Sequence
 from dataclasses import dataclass, field, replace
@@ -24,6 +23,7 @@ from app.foods.nutrition import (
     nutrients_for_portion,
 )
 from app.households import service as households
+from app.local_time import local_today
 from app.meal_slots import DEFAULT_SLOT_TIMES, SLOTS
 from app.models.food import Dish, DishIngredient, Ingredient, PortionMeasure
 from app.models.plan import MealPlan, MealPlanItem
@@ -120,11 +120,6 @@ class Overlap:
 def week_start_for(day: datetime.date) -> datetime.date:
     """The Sunday on or before `day`."""
     return day - datetime.timedelta(days=rules.sunday_index(day))
-
-
-def local_today(user: User) -> datetime.date:
-    """Today where the user is. A day boundary is theirs, not the server's."""
-    return datetime.datetime.now(zoneinfo.ZoneInfo(user.timezone)).date()
 
 
 def portion_label(measure_name: str | None, quantity: float | None, grams: float) -> str:

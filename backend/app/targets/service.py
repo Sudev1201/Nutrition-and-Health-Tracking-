@@ -23,9 +23,11 @@ from app.nutrition_core.compensation import (
     plan_carry,
 )
 from app.nutrition_core.conditions import Warning, apply_conditions
-from app.nutrition_core.energy import Body
+from app.nutrition_core.energy import energy_target
+from app.nutrition_core.recalibration import lowest_target
 from app.nutrition_core.targets import ReferenceValue, Target, build_targets
 from app.profiles import service as profiles
+from app.weight import service as weight
 
 # A carry reaches at most two days forward, so a day's targets are fully
 # determined by the four days before it. Walking that window from a clean slate
@@ -125,7 +127,9 @@ def _policies(
     targets: dict[str, Target],
     nutrients: dict[str, Nutrient],
     disabled: frozenset[str],
+    floors: dict[str, float] | None = None,
 ) -> dict[str, NutrientPolicy]:
+    floors = floors or {}
     policies = {}
     for code, target in targets.items():
         row = nutrients.get(code)
@@ -135,11 +139,34 @@ def _policies(
             is_compensable=compensable,
             compensation_days=(row.compensation_days if row else 0) if compensable else 0,
             is_excess_sensitive=bool(row and row.is_excess_sensitive),
-            ear=target.ear,
+            # A floor the ledger may not lower past, where the target itself has no
+            # EAR -- energy, whose floor is the one recalibration respects.
+            ear=floors.get(code, target.ear),
             tul=target.tul,
             carry_cap_fraction=carry_cap_for(code),
         )
     return policies
+
+
+def _recalibration_warnings(applied_offset_kcal: float) -> list[Warning]:
+    """Say so whenever a recalibration has moved the energy target.
+
+    Otherwise the calorie figure on Today changes with no explanation -- which
+    reads as a bug, or worse, is trusted without being understood.
+    """
+    if abs(applied_offset_kcal) < 1.0:
+        return []
+    direction = "lower" if applied_offset_kcal < 0 else "higher"
+    return [
+        Warning(
+            kind="calorie-recalibrated",
+            message=(
+                f"Your calorie target is {abs(round(applied_offset_kcal))} kcal {direction} "
+                "than the formula gives, because your weigh-ins have drifted from your goal. "
+                "The Weight screen has the detail."
+            ),
+        )
+    ]
 
 
 def resolve_day(
@@ -162,12 +189,8 @@ def resolve_day(
     if profile is None:
         return None
 
-    body = Body(
-        sex=profile.sex,
-        age=profile.age,
-        weight_kg=profile.weight_kg,
-        activity=profile.activity,
-    )
+    body = profiles.body_of(profile)
+    formula = energy_target(body, goal=profile.goal, pace=profile.pace)
     base = build_targets(
         body,
         goal=profile.goal,
@@ -175,6 +198,9 @@ def resolve_day(
         cereal_dominant=profile.cereal_dominant,
         references=load_references(db, profile),
         upper_limits=load_upper_limits(db),
+        # The recalibration in force on this date, so a past day keeps the target
+        # it had and a step taken today does not re-cost yesterday.
+        energy_offset_kcal=weight.offset_on(db, user, target_date),
     )
 
     overlay = apply_conditions(
@@ -187,7 +213,16 @@ def resolve_day(
     )
     targets = overlay.targets
     nutrients = load_nutrients(db)
-    policies = _policies(targets, nutrients, overlay.compensation_disabled)
+    # The ledger may lower energy after a surplus, but never through the floor a
+    # recalibration respects. Carries from two surplus days add up, which without
+    # this could take the day to 40% of its target -- far under BMR -- and the
+    # planner sizes portions from that figure.
+    policies = _policies(
+        targets,
+        nutrients,
+        overlay.compensation_disabled,
+        floors={"energy": lowest_target(body, formula)},
+    )
 
     # Walk the window forward, accumulating what each day hands to the next.
     carried: dict[datetime.date, dict[str, float]] = defaultdict(lambda: defaultdict(float))
@@ -263,6 +298,9 @@ def resolve_day(
     return DayTargets(
         date=target_date,
         nutrients=rows,
-        warnings=overlay.warnings,
+        warnings=[
+            *overlay.warnings,
+            *_recalibration_warnings(targets["energy"].rda - formula),
+        ],
         hold_steady=overlay.compensation_disabled,
     )
