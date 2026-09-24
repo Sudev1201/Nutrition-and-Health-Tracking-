@@ -184,3 +184,21 @@ test('judges the day against the lowered ceiling', () => {
 
   expect(screen.getByText('past the upper limit')).toBeInTheDocument()
 })
+
+// Monday morning after a salty Sunday, nothing has been logged yet -- coverage
+// is 0 before the first bite. The lowered ceiling is set before then, so the
+// reason for it must not wait for something to be measured.
+test('explains a lowered ceiling before anything today is measured', () => {
+  render(
+    <NutrientBar
+      {...SODIUM}
+      consumed={0}
+      target={1400}
+      coverage={0}
+      carriedIn={-600}
+      carriedFrom="Sunday"
+    />,
+  )
+
+  expect(screen.getByText('Lowered by 600 mg after Sunday')).toBeInTheDocument()
+})

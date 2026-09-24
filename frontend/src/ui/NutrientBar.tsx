@@ -62,6 +62,20 @@ export function NutrientBar({
 
   const amounts = `${formatAmount(consumed, unit)} / ${formatWithUnit(target, unit)}`
 
+  /*
+   * The ledger's effect on today's target needs its reason whether or not
+   * anything has been logged yet: a lowered ceiling is set before the first
+   * bite, and a raised one is a promise already made. Shared so both render
+   * branches say the same thing the same way.
+   */
+  const carryNote = carriedIn !== undefined && carriedIn !== 0 && carriedFrom !== undefined && (
+    <span className="text-carried">
+      {carriedIn > 0
+        ? `+${formatAmount(carriedIn, unit)} ${unitLabel(unit)} carried from ${carriedFrom}`
+        : `Lowered by ${formatWithUnit(-carriedIn, unit)} after ${carriedFrom}`}
+    </span>
+  )
+
   if (unmeasured) {
     return (
       <div className="py-3">
@@ -75,6 +89,7 @@ export function NutrientBar({
           Not measured — none of today’s food has a figure for this, so the app
           cannot say how much you had.
         </p>
+        {carryNote && <p className="mt-1 text-xs">{carryNote}</p>}
       </div>
     )
   }
@@ -136,20 +151,7 @@ export function NutrientBar({
 
       <div className="mt-1 flex flex-wrap items-baseline gap-x-3 text-xs">
         <span className={STATUS_TEXT[status]}>{STATUS_LABELS[status]}</span>
-        {carriedIn !== undefined && carriedIn > 0 && carriedFrom !== undefined && (
-          <span className="text-carried">
-            {`+${formatAmount(carriedIn, unit)} ${unitLabel(unit)} carried from ${carriedFrom}`}
-          </span>
-        )}
-        {/*
-          A lowered target needs its reason as much as a raised one: a sodium
-          ceiling that drops to 1,400 mg with no word of why reads as a bug.
-        */}
-        {carriedIn !== undefined && carriedIn < 0 && carriedFrom !== undefined && (
-          <span className="text-carried">
-            {`Lowered by ${formatWithUnit(-carriedIn, unit)} after ${carriedFrom}`}
-          </span>
-        )}
+        {carryNote}
         {/*
           Partial coverage is reported rather than hidden behind a threshold.
           Deciding where "enough" begins would be inventing a number; saying what
