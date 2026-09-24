@@ -351,3 +351,54 @@ def _suggestions(
             )
         )
     return views
+
+
+@dataclass(frozen=True)
+class ProgressCounts:
+    """A member's week as their household may see it: counts of days, and nothing else."""
+
+    tracked_days: int
+    # One nutrient-day per nutrient measured on each tracked day; met by the same
+    # test as the report's days-met column.
+    nutrient_days_met: int
+    nutrient_days_measured: int
+
+
+def member_progress(
+    db: Session, member: User, week_start: datetime.date, today: datetime.date
+) -> ProgressCounts | None:
+    """A member's week as counts for their household. None when they have no profile.
+
+    The counts are the member's own report, summed over the targets a profile has
+    before any condition. Only the sums leave here: which nutrient fell short, and
+    against what target, stays with the member, because a 1,500 mg sodium cap says
+    hypertension as plainly as the diagnosis would. So does a target that only a
+    condition creates, such as high cholesterol's cholesterol ceiling, or, from 60,
+    hypertension's sodium and potassium. Counted, it would add one nutrient-day to
+    every logged day.
+
+    `today` is the member's own date. As in their report, only days that have
+    ended are counted.
+    """
+    if profiles.get_profile(db, member) is None:
+        return None
+    if week_start > today:
+        # A member in a timezone behind the viewer's may not have reached this
+        # Sunday yet. None of the week has ended for them, so there is nothing to count.
+        return ProgressCounts(tracked_days=0, nutrient_days_met=0, nutrient_days_measured=0)
+    # The whole report, suggestions and all, for three sums. A household is a
+    # handful of people and the screen asks once, and a single code path is what
+    # keeps these counts the sums of the member's own report.
+    report = build_week(db, member, week_start, today)
+    # The codes `build_targets` gives before the overlay depend on sex and age band,
+    # never on a condition or a drug, so counting only those keeps the counts silent
+    # on both. A condition that moves a figure (sodium to 1,500 mg) is still counted:
+    # it changes which days are met, never how many are measured.
+    context = targets.load_context(db, member, week_start)
+    public = set(context.built) if context is not None else set()
+    counted = [week for week in report.nutrients if week.code in public]
+    return ProgressCounts(
+        tracked_days=report.tracked_days,
+        nutrient_days_met=sum(week.days_met for week in counted),
+        nutrient_days_measured=sum(week.measured_days for week in counted),
+    )

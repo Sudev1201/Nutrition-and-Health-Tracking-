@@ -1,14 +1,18 @@
+import datetime
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, EmailStr
 from sqlalchemy.orm import Session
 
 from app.auth.deps import get_current_user
 from app.db import get_db
 from app.households import service
+from app.local_time import local_today
 from app.models.household import Household
 from app.models.user import User
+from app.planner import rules
+from app.reports import service as reports
 
 router = APIRouter(prefix="/households", tags=["households"])
 
@@ -54,6 +58,24 @@ class MembershipOut(BaseModel):
     share_health: bool
 
 
+class MemberProgressOut(BaseModel):
+    user_id: uuid.UUID
+    name: str
+    is_me: bool
+    # Whether this viewer may see the member's counts; always true on your own row.
+    shared: bool
+    # Counts of days, never a nutrient or a figure. Null when the member does not
+    # share progress, or has not set up a profile yet.
+    tracked_days: int | None
+    nutrient_days_met: int | None
+    nutrient_days_measured: int | None
+
+
+class HouseholdProgressOut(BaseModel):
+    start_date: datetime.date
+    members: list[MemberProgressOut]
+
+
 def _to_household_out(db: Session, household: Household) -> HouseholdOut:
     members = []
     for membership in service.list_members(db, household.id):
@@ -68,6 +90,20 @@ def _to_household_out(db: Session, household: Household) -> HouseholdOut:
             )
         )
     return HouseholdOut(id=household.id, name=household.name, members=members)
+
+
+def _member_progress_out(
+    member: User, is_me: bool, shared: bool, counts: reports.ProgressCounts | None
+) -> MemberProgressOut:
+    return MemberProgressOut(
+        user_id=member.id,
+        name=member.name,
+        is_me=is_me,
+        shared=shared,
+        tracked_days=counts.tracked_days if counts is not None else None,
+        nutrient_days_met=counts.nutrient_days_met if counts is not None else None,
+        nutrient_days_measured=counts.nutrient_days_measured if counts is not None else None,
+    )
 
 
 @router.post("", status_code=status.HTTP_201_CREATED, response_model=HouseholdOut)
@@ -160,3 +196,42 @@ def update_visibility(
     return MembershipOut(
         share_progress=membership.share_progress, share_health=membership.share_health
     )
+
+
+@router.get("/progress", response_model=HouseholdProgressOut)
+def read_progress(
+    start: datetime.date = Query(),
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> HouseholdProgressOut:
+    """Each member's week as counts of days on track, so whoever cooks can see it.
+
+    Counts only, whatever `share_health` says: a target is health data -- a
+    1,500 mg sodium cap says hypertension -- so no nutrient and no figure leaves
+    the member it belongs to.
+    """
+    if rules.sunday_index(start) != 0:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "The week starts on a Sunday")
+    if start > local_today(user):
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "That week has not started yet")
+    membership = service.get_membership(db, user)
+    if membership is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "You are not in a household yet")
+
+    # You first, then everyone else in the order they joined.
+    rows = sorted(
+        service.list_members(db, membership.household_id),
+        key=lambda item: item.user_id != user.id,
+    )
+    members = []
+    for row in rows:
+        member = db.get(User, row.user_id)
+        is_me = row.user_id == user.id
+        shared = is_me or row.share_progress
+        counts = None
+        if shared:
+            # The member's own today: a day still in progress where they are is
+            # not a finished day, wherever the viewer is.
+            counts = reports.member_progress(db, member, start, local_today(member))
+        members.append(_member_progress_out(member, is_me, shared, counts))
+    return HouseholdProgressOut(start_date=start, members=members)
