@@ -75,35 +75,14 @@ def read_diary(
     db: Session = Depends(get_db),
 ) -> DiaryOut:
     entries = service.list_entries(db, user, date)
-    skipped = service.skipped_on(db, user, date)
-
     meal_times = profiles.get_meal_times(db, user)
     times = {item.slot: item.usual_time.strftime("%H:%M") for item in meal_times}
-    # A profile with no saved meal times at all predates onboarding's meal-times
-    # step, so every slot is shown rather than none.
-    disabled = {item.slot for item in meal_times if not item.is_enabled}
 
-    slots = []
-    for slot in SLOTS:
-        in_slot = [entry for entry in entries if entry.slot == slot]
-
-        # A slot switched off is left out -- but only when the day has nothing in
-        # it. Turning a snack off says how a normal day looks from now on; it is
-        # not a claim about last week, and hiding a real entry would be rewriting
-        # what the user actually ate.
-        if slot in disabled and not in_slot:
-            continue
-
-        if in_slot:
-            # Food wins over a skip: having eaten is a stronger fact than having
-            # said you would not.
-            state = "logged"
-        elif slot in skipped:
-            state = "skipped"
-        else:
-            state = "empty"
-
-        slots.append(
+    # Which slots appear, and in which state, is `slot_states`' call: the report
+    # and the reminders read the same rules this screen shows.
+    return DiaryOut(
+        date=date,
+        slots=[
             SlotOut(
                 slot=slot,
                 time=times.get(slot, DEFAULT_SLOT_TIMES[slot]),
@@ -119,12 +98,13 @@ def read_diary(
                         is_estimated=entry.is_estimated,
                         energy_kcal=service.entry_nutrients(db, entry).get("energy", 0.0),
                     )
-                    for entry in in_slot
+                    for entry in entries
+                    if entry.slot == slot
                 ],
             )
-        )
-
-    return DiaryOut(date=date, slots=slots)
+            for slot, state in service.slot_states(db, user, date).items()
+        ],
+    )
 
 
 @router.post("/entries", status_code=status.HTTP_201_CREATED, response_model=CreatedEntry)

@@ -1,14 +1,17 @@
 import datetime
 import uuid
+from dataclasses import dataclass
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.foods.measures import format_quantity, measures_for_food, resolve_grams
 from app.foods.nutrition import dish_coverage, nutrients_for_portion
+from app.meal_slots import SLOTS
 from app.models.diary import MealLog, MealSlotSkip
 from app.models.food import Dish, Ingredient, IngredientNutrient
 from app.models.nutrient import Nutrient
+from app.models.profile import MealSlotTime
 from app.models.user import User
 
 
@@ -124,9 +127,13 @@ def coverage_on(db: Session, user: User, on_date: datetime.date) -> dict[str, fl
         for code, share in entry_coverage(db, entry).items():
             covered[code] = covered.get(code, 0.0) + share * entry.grams
 
+    return _shares(covered, total_grams)
+
+
+def _shares(covered: dict[str, float], total_grams: float) -> dict[str, float]:
+    """Covered grams per code, as a share of the day's food weight."""
     if total_grams <= 0:
         return {}
-
     return {code: min(grams / total_grams, 1.0) for code, grams in covered.items()}
 
 
@@ -139,6 +146,50 @@ def consumed_on(db: Session, user: User, on_date: datetime.date) -> dict[str, fl
         for code, amount in entry_nutrients(db, entry).items():
             totals[code] = totals.get(code, 0.0) + amount
     return totals
+
+
+@dataclass(frozen=True)
+class DayBreakdown:
+    """One day of the diary, added up in a single pass over its entries.
+
+    The weekly report needs a day's totals, its coverage and its estimated share.
+    Through `consumed_on` and `coverage_on` that is a pass each, and every pass
+    costs each dish again.
+    """
+
+    consumed: dict[str, float]  # == consumed_on(day)
+    coverage: dict[str, float]  # == coverage_on(day)
+    # Energy from entries marked estimated -- eaten out, or eyeballed -- which the
+    # report keeps apart from measured intake.
+    estimated_energy: float
+    logged_slots: frozenset[str]
+
+
+def day_breakdown(db: Session, user: User, on_date: datetime.date) -> DayBreakdown:
+    totals: dict[str, float] = {}
+    covered: dict[str, float] = {}
+    total_grams = 0.0
+    estimated = 0.0
+    slots: set[str] = set()
+
+    for entry in list_entries(db, user, on_date):
+        slots.add(entry.slot)
+        nutrients = entry_nutrients(db, entry)
+        for code, amount in nutrients.items():
+            totals[code] = totals.get(code, 0.0) + amount
+        if entry.is_estimated:
+            estimated += nutrients.get("energy", 0.0)
+
+        total_grams += entry.grams
+        for code, share in entry_coverage(db, entry).items():
+            covered[code] = covered.get(code, 0.0) + share * entry.grams
+
+    return DayBreakdown(
+        consumed=totals,
+        coverage=_shares(covered, total_grams),
+        estimated_energy=estimated,
+        logged_slots=frozenset(slots),
+    )
 
 
 def add_entry(
@@ -212,6 +263,54 @@ def skipped_on(db: Session, user: User, on_date: datetime.date) -> set[str]:
             )
         )
     )
+
+
+def slot_states(db: Session, user: User, on_date: datetime.date) -> dict[str, str]:
+    """Each slot's state on a date, in `SLOTS` order: logged, skipped or empty.
+
+    `skipped` is not `empty`. Empty means the app does not know what happened in
+    the slot; skipped means the user said nothing was eaten there. The diary
+    screen, the weekly report and the reminders all read this, so the rules live
+    here once.
+
+    Reads slot names only, not entries, because the reminder runner calls it
+    every minute for each subscribed user with a slot due.
+    """
+    logged = set(
+        db.scalars(
+            select(MealLog.slot)
+            .where(MealLog.user_id == user.id, MealLog.logged_on == on_date)
+            .distinct()
+        )
+    )
+    skipped = skipped_on(db, user, on_date)
+    # A profile with no saved meal times at all predates onboarding's meal-times
+    # step, so every slot is shown rather than none.
+    disabled = set(
+        db.scalars(
+            select(MealSlotTime.slot).where(
+                MealSlotTime.user_id == user.id, MealSlotTime.is_enabled.is_(False)
+            )
+        )
+    )
+
+    states: dict[str, str] = {}
+    for slot in SLOTS:
+        if slot in logged:
+            # Food wins over a skip: having eaten is a stronger fact than having
+            # said you would not.
+            states[slot] = "logged"
+        elif slot in disabled:
+            # A slot switched off is left out -- but only when the day has nothing
+            # in it. Turning a snack off says how a normal day looks from now on;
+            # it is not a claim about last week, and hiding a real entry would be
+            # rewriting what the user actually ate.
+            continue
+        elif slot in skipped:
+            states[slot] = "skipped"
+        else:
+            states[slot] = "empty"
+    return states
 
 
 def skip_slot(db: Session, user: User, on_date: datetime.date, slot: str) -> bool:
