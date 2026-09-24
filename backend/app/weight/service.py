@@ -170,6 +170,7 @@ def trend(db: Session, user: User, today: datetime.date) -> Trend:
     offset = current.offset_kcal if current is not None else 0.0
     since = current.effective_from if current is not None else None
     points = recalibration.trend_points(history, as_of=today, since=since)
+    previous_points = recalibration.previous_trend_points(history, as_of=today, since=since)
 
     formula = energy_target(body, goal=profile.goal, pace=profile.pace)
     target = recalibration.recalibrated_energy(body, formula, offset)
@@ -190,7 +191,13 @@ def trend(db: Session, user: User, today: datetime.date) -> Trend:
         calorie_target_kcal=target,
         adjustment=adjustment,
         note=recalibration.trend_note(
-            body, profile.goal, profile.pace, offset, points, stepped_on=stepped_on
+            body,
+            profile.goal,
+            profile.pace,
+            offset,
+            points,
+            stepped_on=stepped_on,
+            previous_points=previous_points,
         ),
     )
 
@@ -214,17 +221,17 @@ def _take_step(
     db: Session, user: User, profile: Profile, as_of: datetime.date
 ) -> CalorieAdjustment | None:
     current = adjustment_on(db, user, as_of)
-    points = recalibration.trend_points(
-        weigh_ins(db, user, until=as_of),
-        as_of=as_of,
-        since=current.effective_from if current is not None else None,
-    )
+    since = current.effective_from if current is not None else None
+    history = weigh_ins(db, user, until=as_of)
+    # Two readings, which must agree: as of this weigh-in, and as of the one before
+    # it. One water-heavy morning can decide the first, never both.
     step = recalibration.next_step(
         profiles.body_of(profile),
         profile.goal,
         profile.pace,
         current.offset_kcal if current is not None else 0.0,
-        points,
+        recalibration.trend_points(history, as_of=as_of, since=since),
+        previous_points=recalibration.previous_trend_points(history, as_of=as_of, since=since),
     )
     if step is None:
         return None
@@ -275,9 +282,9 @@ def _reread_step(
 ) -> CalorieAdjustment | None:
     """Re-read the step in force at its own date, if `on_date` was in its reading.
 
-    A step is read from every weigh-in in its window, not only the one on its date,
-    so correcting or deleting any of them must re-read it -- or a typo would leave
-    a cut the remaining weigh-ins no longer support.
+    A step is read from every weigh-in in its two windows, not only the one on its
+    date, so correcting or deleting any of them must re-read it -- or a typo would
+    leave a cut the remaining weigh-ins no longer support.
     """
     step = db.scalars(
         select(CalorieAdjustment)
@@ -288,14 +295,18 @@ def _reread_step(
     if step is None or step.kind != "step" or on_date > step.effective_from:
         return None
 
-    previous = adjustment_on(db, user, step.effective_from - datetime.timedelta(days=1))
-    start = step.effective_from - datetime.timedelta(days=recalibration.TREND_WINDOW_DAYS)
+    as_of = step.effective_from
+    # The earlier of the two readings ends at the weigh-in before the step's, so
+    # its window reaches furthest back.
+    earlier = [w.date for w in weigh_ins(db, user, until=as_of) if w.date < as_of]
+    reading_ends = earlier[-1] if earlier else as_of
+    start = reading_ends - datetime.timedelta(days=recalibration.TREND_WINDOW_DAYS)
+    previous = adjustment_on(db, user, as_of - datetime.timedelta(days=1))
     if previous is not None:
         start = max(start, previous.effective_from)
     if on_date < start:
         return None
 
-    as_of = step.effective_from
     db.delete(step)
     db.flush()
     return _take_step(db, user, profile, as_of)

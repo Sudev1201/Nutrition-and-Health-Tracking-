@@ -1,7 +1,8 @@
 """Weight-driven recalibration: the arithmetic, and the bounds the spec requires.
 
 The reference man throughout is 25 y, 65 kg and sedentary: formula target 2,105.3
-kcal on "maintain", uncorrected FAO/WHO/UNU BMR 1,670.9 kcal.
+kcal on "maintain", uncorrected FAO/WHO/UNU BMR 1,670.9 kcal. The reference woman
+is 25 y, 55 kg and sedentary: 1,658.2 kcal on "maintain", so a 10% bound of 165.8.
 """
 
 import datetime
@@ -16,6 +17,7 @@ from app.nutrition_core.recalibration import (
     lowest_target,
     next_step,
     observed_rate,
+    previous_trend_points,
     recalibrated_energy,
     smoothed_weight,
     trend_note,
@@ -32,6 +34,29 @@ DAY0 = datetime.date(2026, 8, 3)
 
 def weekly(*weights: float) -> list[WeighIn]:
     return [WeighIn(DAY0 + datetime.timedelta(weeks=i), kg) for i, kg in enumerate(weights)]
+
+
+def readings(*weights: float) -> tuple[list[WeighIn], list[WeighIn]]:
+    """The two readings a step is decided on, the newest weigh-in being today's.
+
+    The trend as of the newest weigh-in, and as it stood at the one before it.
+    """
+    history = weekly(*weights)
+    as_of = history[-1].date
+    return (
+        trend_points(history, as_of=as_of, since=None),
+        previous_trend_points(history, as_of=as_of, since=None),
+    )
+
+
+def step_after(body: Body, goal: str, pace: str | None, offset: float, *weights: float):
+    points, previous = readings(*weights)
+    return next_step(body, goal, pace, offset, points, previous_points=previous)
+
+
+def note_after(body: Body, goal: str, pace: str | None, offset: float, *weights: float):
+    points, previous = readings(*weights)
+    return trend_note(body, goal, pace, offset, points, stepped_on=None, previous_points=previous)
 
 
 # --- smoothing and the trend ----------------------------------------------------------------
@@ -80,6 +105,29 @@ def test_the_trend_restarts_at_the_last_step():
         since=DAY0 + datetime.timedelta(weeks=2),
     )
     assert [p.weight_kg for p in points] == [71.0, 71.5]
+
+
+def test_the_previous_reading_is_the_trend_as_of_the_weigh_in_before_the_newest():
+    history = weekly(70.0, 70.5, 71.0, 71.5)
+    points = previous_trend_points(history, as_of=DAY0 + datetime.timedelta(weeks=3), since=None)
+    assert [p.weight_kg for p in points] == [70.0, 70.5, 71.0]
+
+
+def test_the_previous_reading_keeps_its_own_four_weeks_and_the_last_step():
+    history = weekly(80.0, 70.0, 70.0, 70.0, 70.0, 70.0, 70.0)
+    as_of = DAY0 + datetime.timedelta(weeks=6)
+    # As of week 5, the four weeks back to week 1: the 80 kg of week 0 is out.
+    assert [p.weight_kg for p in previous_trend_points(history, as_of, since=None)] == [70.0] * 5
+    # And nothing before the step on week 4.
+    since = DAY0 + datetime.timedelta(weeks=4)
+    assert [p.date for p in previous_trend_points(history, as_of, since=since)] == [
+        since,
+        since + datetime.timedelta(weeks=1),
+    ]
+
+
+def test_there_is_no_previous_reading_before_the_second_weigh_in():
+    assert previous_trend_points(weekly(70.0), as_of=DAY0, since=None) == []
 
 
 # --- the expected trajectory ----------------------------------------------------------------
@@ -153,58 +201,109 @@ def test_a_recalibrated_target_never_leaves_its_bounds(body, goal, pace, offset)
 
 
 def test_a_sustained_gain_on_maintain_takes_a_step_down():
-    step = next_step(MAN, "maintain", None, 0.0, weekly(65.0, 65.5, 66.0))
+    step = step_after(MAN, "maintain", None, 0.0, 64.5, 65.0, 65.5, 66.0)
 
-    # 0.5 kg/week of drift, half-corrected, is 275 kcal: bounded to 10% (210.5 kcal)
-    # and kept to whole tens.
+    # 0.5 kg/week of drift on both readings, half-corrected, is 275 kcal: bounded
+    # to 10% (210.5 kcal) and kept to whole tens.
     assert step.offset_kcal == -210.0
     assert step.observed_kg_per_week == pytest.approx(0.5)
     assert step.expected_kg_per_week == 0.0
 
 
 def test_losing_on_maintain_takes_a_step_up():
-    step = next_step(MAN, "maintain", None, 0.0, weekly(66.0, 65.7, 65.4))
+    step = step_after(MAN, "maintain", None, 0.0, 66.3, 66.0, 65.7, 65.4)
 
     # 0.3 kg/week × 1,100 × 0.5 = 165 kcal, truncated to 160.
     assert step.offset_kcal == 160.0
 
 
 def test_drift_inside_the_tolerance_takes_no_step():
-    assert next_step(MAN, "maintain", None, 0.0, weekly(65.0, 65.1, 65.2)) is None
+    assert step_after(MAN, "maintain", None, 0.0, 64.9, 65.0, 65.1, 65.2) is None
 
 
 def test_steps_do_not_compound_past_the_bound():
-    assert next_step(MAN, "maintain", None, -210.0, weekly(66.0, 66.5, 67.0)) is None
+    assert step_after(MAN, "maintain", None, -210.0, 65.5, 66.0, 66.5, 67.0) is None
 
 
 def test_a_target_on_the_bmr_floor_takes_no_step_down():
     # A steady loss already clamps him at BMR, so a stalled trend has nowhere to push.
-    assert next_step(MAN, "lose", "steady", 0.0, weekly(65.0, 65.0, 65.0)) is None
+    assert step_after(MAN, "lose", "steady", 0.0, 65.0, 65.0, 65.0, 65.0) is None
 
 
 def test_the_reason_says_what_happened_in_plain_words():
-    step = next_step(MAN, "maintain", None, 0.0, weekly(65.0, 65.5, 66.0))
+    step = step_after(MAN, "maintain", None, 0.0, 64.5, 65.0, 65.5, 66.0)
 
     assert "risen about 0.5 kg a week" in step.reason
     assert "holding steady" in step.reason
     assert "moves down" in step.reason
 
 
+def test_a_step_is_sized_from_the_offset_in_force_not_the_one_stored():
+    # -300 kcal was stored when the formula was higher; today's bound is 210.5, so
+    # -210.5 is what is in force. A 0.3 kg/week loss moves that up by 165 kcal, to
+    # -45.5 and so -40 -- not the -300 + 165 = -135 the stored figure would give.
+    step = step_after(MAN, "maintain", None, -300.0, 66.3, 66.0, 65.7, 65.4)
+
+    assert step.offset_kcal == -40.0
+
+
+# --- a step needs the trend confirmed -------------------------------------------------------
+
+
+def test_a_trend_read_once_takes_no_step():
+    # Three weigh-ins are a trend of 0.5 kg/week, but the reading before had two.
+    assert step_after(WOMAN, "maintain", None, 0.0, 55.0, 55.5, 56.0) is None
+
+
+def test_a_sustained_half_a_kilo_a_week_over_four_readings_takes_a_step():
+    step = step_after(WOMAN, "maintain", None, 0.0, 55.0, 55.5, 56.0, 56.5)
+
+    # 275 kcal, bounded to her 165.8 and kept to whole tens.
+    assert step.offset_kcal == -160.0
+    assert step.observed_kg_per_week == pytest.approx(0.5)
+
+
+def test_one_water_heavy_morning_as_the_newest_weigh_in_takes_no_step():
+    # With three weekly points the fitted slope is (last - first) / 2: 0.4 kg/week,
+    # from one premenstrual morning. The reading before it had no trend to agree.
+    assert step_after(WOMAN, "maintain", None, 0.0, 55.0, 55.0, 55.8) is None
+
+
+def test_one_water_heavy_morning_is_diluted_by_the_next_weigh_in():
+    # 0.08 kg/week once 55.0 follows it -- inside the tolerance -- so the 0.4 of
+    # the reading before is never confirmed.
+    assert step_after(WOMAN, "maintain", None, 0.0, 55.0, 55.0, 55.8, 55.0) is None
+
+
+def test_no_weigh_in_of_a_flat_series_with_one_heavy_morning_steps():
+    series = (55.0, 55.0, 55.8, 55.0, 55.0, 55.0, 55.0)
+    for n in range(1, len(series) + 1):
+        assert step_after(WOMAN, "maintain", None, 0.0, *series[:n]) is None, series[:n]
+
+
+def test_readings_that_disagree_in_direction_take_no_step():
+    rising = weekly(55.0, 55.5, 56.0)
+    falling = weekly(56.0, 55.5, 55.0)
+    assert next_step(WOMAN, "maintain", None, 0.0, rising, previous_points=falling) is None
+
+
 # --- the note on the weight screen ----------------------------------------------------------
 
 
 def test_the_note_asks_for_more_weigh_ins_before_there_is_a_trend():
-    note = trend_note(MAN, "maintain", None, 0.0, weekly(65.0), stepped_on=None)
+    note = note_after(MAN, "maintain", None, 0.0, 65.0)
     assert "three weigh-ins" in note
 
 
 def test_the_note_after_a_step_says_when_the_target_moved():
-    note = trend_note(MAN, "maintain", None, -210.0, weekly(65.0), stepped_on=DAY0)
+    note = trend_note(
+        MAN, "maintain", None, -210.0, weekly(65.0), stepped_on=DAY0, previous_points=[]
+    )
     assert "3 August" in note
 
 
 def test_the_note_explains_a_target_that_cannot_move_further():
-    note = trend_note(MAN, "lose", "steady", 0.0, weekly(65.0, 65.0, 65.0), stepped_on=None)
+    note = note_after(MAN, "lose", "steady", 0.0, 65.0, 65.0, 65.0, 65.0)
     assert "as far down" in note
     assert "activity level" in note
     # Nothing moved his target -- it sits on the formula's floor -- so it must not say so.
@@ -214,5 +313,25 @@ def test_the_note_explains_a_target_that_cannot_move_further():
 
 
 def test_the_note_is_plain_when_on_track():
-    note = trend_note(MAN, "maintain", None, 0.0, weekly(65.0, 65.1, 65.0), stepped_on=None)
+    note = note_after(MAN, "maintain", None, 0.0, 65.0, 65.1, 65.0)
     assert "tracking your goal" in note
+
+
+def test_an_unconfirmed_drift_says_the_next_weigh_in_decides():
+    note = note_after(WOMAN, "maintain", None, 0.0, 55.0, 55.0, 55.8)
+    assert note == (
+        "Your weight has risen about 0.4 kg a week. If your next weigh-in confirms it, "
+        "your calorie target will move."
+    )
+
+
+def test_an_unconfirmed_drift_against_a_moving_goal_names_the_goal():
+    # "Held steady" alone would not say why a target might move.
+    note = note_after(MAN, "gain", "steady", 0.0, 65.0, 65.0, 65.0)
+    assert "held steady against a goal of gaining about 0.5 kg a week" in note
+    assert "If your next weigh-in confirms it" in note
+
+
+def test_there_is_no_note_once_both_readings_agree():
+    # The step itself explains the move, through the adjustment's reason.
+    assert note_after(MAN, "maintain", None, 0.0, 64.5, 65.0, 65.5, 66.0) is None

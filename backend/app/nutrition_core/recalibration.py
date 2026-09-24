@@ -33,7 +33,12 @@ TREND_WINDOW_DAYS = 28
 MIN_TREND_WEIGH_INS = 3
 MIN_TREND_SPAN_DAYS = 14
 
-# Drift smaller than this sits inside the scatter of weekly weigh-ins.
+# Drift smaller than this sits inside the scatter of weekly weigh-ins. A step also
+# needs the drift confirmed: the reading as of the weigh-in before must be past it
+# too, in the same direction. With three weekly points the fitted slope is
+# (last - first) / 2, so one water-heavy morning as the newest weigh-in decides a
+# reading on its own; the next weigh-in either dilutes it or confirms a real trend.
+# Weighing weekly, a step therefore needs four weigh-ins across three weeks.
 DRIFT_TOLERANCE_KG_PER_WEEK = 0.25
 
 # 1 kg/week of drift is ~1,100 kcal/day of imbalance. Half of it is corrected per
@@ -94,11 +99,28 @@ def trend_points(
     return sorted((w for w in weigh_ins if start <= w.date <= as_of), key=lambda w: w.date)
 
 
+def previous_trend_points(
+    weigh_ins: Sequence[WeighIn], as_of: datetime.date, since: datetime.date | None
+) -> list[WeighIn]:
+    """The trend points as they stood at the weigh-in before the newest one.
+
+    The earlier of the two readings a step needs (see `next_step`): the same
+    window rules, as of the last weigh-in before the newest on or before `as_of`,
+    and nothing before `since`. Empty before the second weigh-in.
+    """
+    dated = sorted((w for w in weigh_ins if w.date <= as_of), key=lambda w: w.date)
+    if len(dated) < 2:
+        return []
+    earlier = dated[:-1]
+    return trend_points(earlier, as_of=earlier[-1].date, since=since)
+
+
 def observed_rate(points: Sequence[WeighIn]) -> float | None:
     """Least-squares slope in kg/week, or None when there is too little to read.
 
-    A fitted slope rather than last-minus-first, so one water-heavy morning at
-    either end cannot decide the answer by itself.
+    Every point counts, but not equally: with three weekly points the slope is
+    exactly (last - first) / 2 and the middle one carries no weight. One reading
+    is therefore not enough to step on; `next_step` asks for two that agree.
     """
     ordered = sorted(points, key=lambda w: w.date)
     if len(ordered) < MIN_TREND_WEIGH_INS:
@@ -153,30 +175,22 @@ def next_step(
     pace: str | None,
     current_offset_kcal: float,
     points: Sequence[WeighIn],
+    *,
+    previous_points: Sequence[WeighIn],
 ) -> Step | None:
-    """The step the trend calls for, or None when it calls for none or none is possible."""
+    """The step the trend calls for, or None when it calls for none or none is possible.
+
+    `points` is the reading as of the newest weigh-in and `previous_points` the one
+    as of the weigh-in before it (`previous_trend_points`). A step needs both to
+    drift past the tolerance in the same direction, and is sized from the newest.
+    """
     observed = observed_rate(points)
     if observed is None:
         return None
     expected = expected_rate(body, goal, pace)
-    drift = observed - expected
-    if abs(drift) < DRIFT_TOLERANCE_KG_PER_WEEK:
+    if not _confirmed(observed - expected, _drift(previous_points, expected)):
         return None
-
-    formula = energy_target(body, goal=goal, pace=pace)
-    proposed = current_offset_kcal - drift * KCAL_PER_DAY_PER_KG_PER_WEEK * STEP_DAMPING
-    applied = _whole_tens(recalibrated_energy(body, formula, proposed) - formula)
-    current = recalibrated_energy(body, formula, current_offset_kcal) - formula
-    if abs(applied - current) < OFFSET_STEP_KCAL:
-        # Already at the bound or the floor: there is nowhere left to move.
-        return None
-
-    return Step(
-        offset_kcal=applied,
-        expected_kg_per_week=expected,
-        observed_kg_per_week=observed,
-        reason=_reason(expected, observed, lower=applied < current),
-    )
+    return _bounded_step(body, goal, pace, current_offset_kcal, expected, observed)
 
 
 def trend_note(
@@ -186,8 +200,13 @@ def trend_note(
     current_offset_kcal: float,
     points: Sequence[WeighIn],
     stepped_on: datetime.date | None,
+    *,
+    previous_points: Sequence[WeighIn],
 ) -> str | None:
-    """One sentence on where the trend stands, for the weight screen."""
+    """One sentence on where the trend stands, for the weight screen.
+
+    Takes the same two readings as `next_step`.
+    """
     observed = observed_rate(points)
     if observed is None:
         if stepped_on is not None:
@@ -200,10 +219,21 @@ def trend_note(
             "once a week is enough."
         )
 
-    drift = observed - expected_rate(body, goal, pace)
+    expected = expected_rate(body, goal, pace)
+    drift = observed - expected
     if abs(drift) < DRIFT_TOLERANCE_KG_PER_WEEK:
         return "Your weight is tracking your goal, so your calorie target stays where it is."
-    if next_step(body, goal, pace, current_offset_kcal, points) is not None:
+    if _bounded_step(body, goal, pace, current_offset_kcal, expected, observed) is not None:
+        if not _confirmed(drift, _drift(previous_points, expected)):
+            # "Held steady" alone would not say why a target might move.
+            against = ""
+            if abs(expected) >= STEADY_KG_PER_WEEK:
+                against = f" against {_goal_words(expected)}"
+            return (
+                f"Your weight has {_rate_words(observed)}{against}. If your next weigh-in "
+                "confirms it, your calorie target will move."
+            )
+        # Both readings agree: the step's own reason explains the move.
         return None
 
     formula = energy_target(body, goal=goal, pace=pace)
@@ -219,6 +249,47 @@ def trend_note(
         f"Your weight is running {position} your goal's trajectory, but {limit}. Check that "
         "the weight and activity level in your profile are right, and if the change is "
         "unexplained, mention it to your clinician."
+    )
+
+
+def _drift(points: Sequence[WeighIn], expected: float) -> float | None:
+    observed = observed_rate(points)
+    return None if observed is None else observed - expected
+
+
+def _confirmed(drift: float, previous_drift: float | None) -> bool:
+    """Whether two consecutive readings both call for a step, the same way."""
+    if previous_drift is None:
+        return False
+    if min(abs(drift), abs(previous_drift)) < DRIFT_TOLERANCE_KG_PER_WEEK:
+        return False
+    return (drift > 0) == (previous_drift > 0)
+
+
+def _bounded_step(
+    body: Body,
+    goal: str,
+    pace: str | None,
+    current_offset_kcal: float,
+    expected: float,
+    observed: float,
+) -> Step | None:
+    """The step a drift calls for, or None when the bound or the floor leaves no room."""
+    formula = energy_target(body, goal=goal, pace=pace)
+    # The offset in force, not the one stored: a stored offset can sit past today's
+    # bound or floor when the formula has since moved with the weight.
+    current = recalibrated_energy(body, formula, current_offset_kcal) - formula
+    proposed = current - (observed - expected) * KCAL_PER_DAY_PER_KG_PER_WEEK * STEP_DAMPING
+    applied = _whole_tens(recalibrated_energy(body, formula, proposed) - formula)
+    if abs(applied - current) < OFFSET_STEP_KCAL:
+        # Already at the bound or the floor: there is nowhere left to move.
+        return None
+
+    return Step(
+        offset_kcal=applied,
+        expected_kg_per_week=expected,
+        observed_kg_per_week=observed,
+        reason=_reason(expected, observed, lower=applied < current),
     )
 
 

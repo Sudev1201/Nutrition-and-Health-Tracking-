@@ -25,7 +25,8 @@ def days_ago(n: int) -> datetime.date:
 
 def take_a_step(api) -> dict:
     """Spec manual step 8 -- drift from the goal moves the target by a bounded step --
-    with the third weigh-in a trend needs."""
+    with the fourth weigh-in, which confirms the trend the third one read."""
+    api.post("/weight", json={"weight_kg": 64.5, "date": str(days_ago(21))})
     api.post("/weight", json={"weight_kg": 65.0, "date": str(days_ago(14))})
     api.post("/weight", json={"weight_kg": 65.5, "date": str(days_ago(7))})
     response = api.post("/weight", json={"weight_kg": 66.0})
