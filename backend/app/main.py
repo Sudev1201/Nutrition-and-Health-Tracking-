@@ -9,6 +9,7 @@ from app.foods.router import router as foods_router
 from app.households.router import router as households_router
 from app.planner.router import router as planner_router
 from app.profiles.router import router as profile_router
+from app.reminders.router import push_router, settings_router
 from app.reports.router import router as reports_router
 from app.targets.router import router as targets_router
 from app.weight.router import router as weight_router
@@ -33,6 +34,8 @@ app.include_router(planner_router)
 app.include_router(weight_router)
 app.include_router(cycle_router)
 app.include_router(reports_router)
+app.include_router(settings_router)
+app.include_router(push_router)
 
 
 @app.get("/health")

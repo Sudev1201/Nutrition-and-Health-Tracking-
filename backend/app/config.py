@@ -20,5 +20,18 @@ class Settings(BaseSettings):
 
     frontend_origin: str = "http://localhost:5173"
 
+    # Web push (VAPID). With either key empty, reminders are off on this server:
+    # GET /push/public-key answers 503 and the Reminders screen says so. Both are
+    # base64url strings; .env.example says how to generate a pair.
+    vapid_public_key: str = ""
+    vapid_private_key: str = ""
+    # Who a push service contacts about this sender: a mailto: or https: URL.
+    vapid_subject: str = "mailto:admin@example.com"
+
+    # Sends reminders from the API process, checking every minute. Off by default:
+    # every API test's TestClient runs the app's lifespan, and a loop there would
+    # read the development database.
+    scheduler_enabled: bool = False
+
 
 settings = Settings()
