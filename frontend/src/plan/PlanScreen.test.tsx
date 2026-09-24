@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { render, screen, within } from '@testing-library/react'
+import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { http, HttpResponse } from 'msw'
 import { MemoryRouter } from 'react-router-dom'
@@ -109,6 +109,37 @@ test('a locked meal cannot be swapped', async () => {
   const monday = await day('Monday')
   const lockedRow = monday.getByText('Curd rice with poriyal').closest('li')
   expect(within(lockedRow!).getByRole('button', { name: /swap/i })).toBeDisabled()
+})
+
+// A regenerate replaces every unlocked item, so a swap or lock sent while it runs
+// targets a row that is being replaced -- the server answered 500 for that.
+test('swapping and locking wait while the week regenerates', async () => {
+  let release: () => void = () => {}
+  const held = new Promise<void>((resolve) => {
+    release = resolve
+  })
+  server.use(
+    http.post(apiUrl('/plan/week/regenerate'), async () => {
+      await held
+      return HttpResponse.json(PLAN_FIXTURE)
+    }),
+  )
+  renderScreen()
+
+  const sunday = await day('Sunday')
+  const row = sunday.getByText('Ven pongal').closest('li')!
+  const swap = within(row).getByRole('button', { name: /swap/i })
+  const lock = within(row).getByRole('button', { name: /^lock$/i })
+  expect(swap).toBeEnabled()
+  expect(lock).toBeEnabled()
+
+  await userEvent.click(screen.getByRole('button', { name: /regenerate week/i }))
+
+  expect(swap).toBeDisabled()
+  expect(lock).toBeDisabled()
+  release()
+  await waitFor(() => expect(swap).toBeEnabled())
+  expect(lock).toBeEnabled()
 })
 
 // The planner never plans a day that has already ended, so a plan fetched

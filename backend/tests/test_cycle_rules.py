@@ -167,7 +167,7 @@ def test_every_note_carries_its_evidence_grade():
 
     assert grades == {
         "coffee-timing": "strong",
-        "vitamin-c": "moderate",
+        "vitamin-c": "mechanistic",
         "ginger": "moderate",
         "fenugreek": "low",
         "calcium": "moderate",

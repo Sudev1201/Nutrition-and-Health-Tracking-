@@ -47,7 +47,7 @@ export const CYCLE_FIXTURE: CycleState = {
       id: 'vitamin-c',
       title: 'Pair iron-rich meals with lemon, tomato, tamarind, amla or guava',
       body: 'Around your period, have something rich in vitamin C with the meal that carries your iron. This changes what to eat alongside, not how much iron you need.',
-      evidence: 'moderate',
+      evidence: 'mechanistic',
     },
     {
       id: 'ginger',

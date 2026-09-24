@@ -78,7 +78,9 @@ class Note:
     id: str
     title: str
     body: str
-    evidence: str  # strong | moderate | low | traditional
+    # strong | moderate | mechanistic | low | traditional. "mechanistic": the mechanism
+    # is sound but the trial evidence is limited -- labelled, not laundered as moderate.
+    evidence: str
 
 
 COFFEE_TIMING = Note(
@@ -100,7 +102,7 @@ VITAMIN_C = Note(
         "The mechanism is well established. This changes what to eat alongside, not how much "
         "iron you need."
     ),
-    evidence="moderate",
+    evidence="mechanistic",
 )
 
 GINGER = Note(

@@ -25,7 +25,11 @@ function WarningNote({ warning }: { warning: TodayWarning }) {
       }
     >
       <Icon className="mt-0.5 size-4 shrink-0" aria-hidden="true" />
-      <span>{warning.message}</span>
+      <span>
+        {/* The colour and the icon are both invisible to a screen reader. */}
+        {conflict && <span className="sr-only">Warning: </span>}
+        {warning.message}
+      </span>
     </li>
   )
 }

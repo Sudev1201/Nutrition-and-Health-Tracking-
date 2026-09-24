@@ -155,7 +155,7 @@ export function HouseholdScreen() {
               }
             />
             <Checkbox
-              label="Share my health details (conditions, weight)"
+              label="Share my health details (conditions, weight, cycle)"
               checked={me?.share_health ?? false}
               onChange={(event) =>
                 updateVisibility.mutate({ share_health: event.target.checked })

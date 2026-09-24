@@ -18,6 +18,9 @@ import { useClearCycleDay, useCycle, useEraseCycle, useSetCycleEnabled } from '.
 const EVIDENCE_LABELS: Record<EvidenceGrade, string> = {
   strong: 'Strong evidence',
   moderate: 'Moderate evidence',
+  // Sound reasoning from how the body works, but not trial-grade: kept apart from
+  // "moderate" so a mechanism is never presented as a trial result.
+  mechanistic: 'Sound mechanism, limited trial evidence',
   low: 'Low-quality evidence',
   // Never presented as established nutrition.
   traditional: 'Traditional practice, not established nutrition',

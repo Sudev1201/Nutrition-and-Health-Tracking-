@@ -2,7 +2,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { render, screen } from '@testing-library/react'
 import { http, HttpResponse } from 'msw'
 import { MemoryRouter } from 'react-router-dom'
-import { beforeEach, expect, test } from 'vitest'
+import { beforeEach, expect, test, vi } from 'vitest'
 import { apiUrl } from '../mocks/apiUrl'
 import { DIARY_FIXTURE } from '../mocks/fixtures/diary'
 import { TODAY_FIXTURE } from '../mocks/fixtures/today'
@@ -218,7 +218,10 @@ test('explains a recalibrated calorie target and a non-ICMR iron figure', async 
 })
 
 // Two warnings of one kind are two warnings, not one rendered twice under one key.
+// React still renders both children when their keys collide -- it only logs --
+// so the log is what this watches.
 test('shows every warning, even two of the same kind', async () => {
+  const consoleError = vi.spyOn(console, 'error')
   server.use(
     http.get(apiUrl('/targets/today'), () =>
       HttpResponse.json({
@@ -234,4 +237,38 @@ test('shows every warning, even two of the same kind', async () => {
 
   expect(await screen.findByText('First interaction.')).toBeInTheDocument()
   expect(screen.getByText('Second interaction.')).toBeInTheDocument()
+  const logged = consoleError.mock.calls.map((call) => call.map(String).join(' '))
+  consoleError.mockRestore()
+  expect(logged.filter((message) => message.includes('same key'))).toEqual([])
+})
+
+// After menopause the body has no route to shed iron: a day near the limit is to
+// act on, not to note. The tone must not be colour alone.
+test('gives iron near its limit the alarm treatment, in words as well as colour', async () => {
+  server.use(
+    http.get(apiUrl('/targets/today'), () =>
+      HttpResponse.json({
+        ...TODAY_FIXTURE,
+        warnings: [
+          {
+            kind: 'approaching-limit',
+            message: 'Iron today is 38 mg, close to the 45 mg upper limit.',
+          },
+          {
+            kind: 'reference-framework',
+            message: 'Your iron target is 8 mg, the IOM figure for women after menopause.',
+          },
+        ],
+      }),
+    ),
+  )
+  renderScreen()
+
+  const alarm = (await screen.findByText(/close to the 45 mg upper limit/)).closest('li')
+  const info = screen.getByText(/the IOM figure for women after menopause/).closest('li')
+
+  expect(alarm).toHaveTextContent(/^Warning: Iron today is 38 mg/)
+  expect(alarm).toHaveClass('text-above-limit')
+  expect(info).not.toHaveTextContent(/Warning:/)
+  expect(info).not.toHaveClass('text-above-limit')
 })

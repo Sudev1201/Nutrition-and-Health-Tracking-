@@ -106,3 +106,16 @@ test('shows your own health-sharing setting, not the first member’s', async ()
 
   expect(await screen.findByRole('checkbox', { name: /share my health details/i })).not.toBeChecked()
 })
+
+// Cycle data falls under the same switch, so the switch must say so: whichever
+// endpoint first honours it will share cycle data under this label.
+test('names cycle data among the health details the switch shares', async () => {
+  withHousehold()
+  renderScreen()
+
+  expect(
+    await screen.findByRole('checkbox', {
+      name: 'Share my health details (conditions, weight, cycle)',
+    }),
+  ).toBeInTheDocument()
+})

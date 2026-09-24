@@ -126,6 +126,15 @@ test('labels how strong the evidence behind each suggestion is', async () => {
   expect(await screen.findByText('Strong evidence')).toBeInTheDocument()
 })
 
+// The vitamin C pairing rests on a well-established mechanism, not on trials of
+// the pairing itself: badging it "Moderate evidence" would put it level with
+// ginger's head-to-head trials.
+test('labels a sound mechanism with limited trials as exactly that', async () => {
+  renderScreen()
+
+  expect(await screen.findByText('Sound mechanism, limited trial evidence')).toBeInTheDocument()
+})
+
 // Heavy bleeding gets a clinician, not a nutrient tweak: roughly 1 in 5
 // adolescents with heavy bleeding has an underlying bleeding disorder.
 test('refers heavy bleeding to a clinician rather than adjusting nutrients', async () => {

@@ -48,9 +48,10 @@ export interface CycleDayInput {
 /**
  * How well supported a piece of advice is. Rendered as a visible label, because
  * the spec commits to evidence being "labelled, not laundered" — traditional
- * practice must never be presented as established nutrition.
+ * practice must never be presented as established nutrition, nor a sound
+ * mechanism (`mechanistic`) as trial evidence.
  */
-export type EvidenceGrade = 'strong' | 'moderate' | 'low' | 'traditional'
+export type EvidenceGrade = 'strong' | 'moderate' | 'mechanistic' | 'low' | 'traditional'
 
 export interface CoachingNote {
   id: string

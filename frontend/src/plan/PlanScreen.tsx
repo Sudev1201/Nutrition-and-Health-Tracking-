@@ -13,7 +13,12 @@ import { CookingView } from './CookingView'
 import type { PlanDay, PlanItem } from './types'
 import { useRegenerateWeek, useSwapItem, useToggleLock, useWeekPlan, weekStartIso } from './usePlan'
 
-function ItemRow({ item }: { item: PlanItem }) {
+/**
+ * `regenerating`: a regenerate replaces every unlocked item, so a swap or lock
+ * sent meanwhile targets a row that is being replaced, and the server answers
+ * 500. Both wait for it.
+ */
+function ItemRow({ item, regenerating }: { item: PlanItem; regenerating: boolean }) {
   const toggleLock = useToggleLock()
   const swap = useSwapItem()
 
@@ -35,7 +40,7 @@ function ItemRow({ item }: { item: PlanItem }) {
         <Button
           variant="quiet"
           className="min-h-9 px-2 text-xs"
-          disabled={item.locked || swap.isPending}
+          disabled={item.locked || swap.isPending || regenerating}
           onClick={() => swap.mutate(item.id)}
         >
           <Shuffle className="size-3.5" aria-hidden="true" />
@@ -44,7 +49,7 @@ function ItemRow({ item }: { item: PlanItem }) {
         <Button
           variant="quiet"
           className="min-h-9 px-2 text-xs"
-          disabled={toggleLock.isPending}
+          disabled={toggleLock.isPending || regenerating}
           onClick={() => toggleLock.mutate({ itemId: item.id, locked: !item.locked })}
         >
           {item.locked ? (
@@ -63,7 +68,15 @@ function ItemRow({ item }: { item: PlanItem }) {
  * One day of the plan, as a landmark region so the week is navigable by day for
  * a screen-reader user rather than being one undifferentiated list.
  */
-function DayPanel({ day, hiddenOnPhone }: { day: PlanDay; hiddenOnPhone: boolean }) {
+function DayPanel({
+  day,
+  hiddenOnPhone,
+  regenerating,
+}: {
+  day: PlanDay
+  hiddenOnPhone: boolean
+  regenerating: boolean
+}) {
   return (
     <section
       aria-label={day.weekday}
@@ -88,7 +101,7 @@ function DayPanel({ day, hiddenOnPhone }: { day: PlanDay; hiddenOnPhone: boolean
       ) : (
         <ul>
           {day.items.map((item) => (
-            <ItemRow key={item.id} item={item} />
+            <ItemRow key={item.id} item={item} regenerating={regenerating} />
           ))}
         </ul>
       )}
@@ -175,7 +188,12 @@ export function PlanScreen() {
 
       <div className="grid gap-3 lg:grid-cols-7">
         {days.map((day) => (
-          <DayPanel key={day.date} day={day} hiddenOnPhone={day.date !== active.date} />
+          <DayPanel
+            key={day.date}
+            day={day}
+            hiddenOnPhone={day.date !== active.date}
+            regenerating={regenerate.isPending}
+          />
         ))}
       </div>
     </section>
