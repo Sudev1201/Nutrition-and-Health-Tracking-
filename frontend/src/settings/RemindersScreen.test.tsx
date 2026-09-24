@@ -274,6 +274,9 @@ test('a device with reminders on can turn them off', async () => {
   devices = 1
   let forgotten: unknown = null
   server.use(
+    // A device reading "on" re-posts itself to catch the server up; this one
+    // already agrees, so the re-post changes nothing.
+    http.post(apiUrl('/push/subscriptions'), () => HttpResponse.json({ devices }, { status: 201 })),
     http.delete(apiUrl('/push/subscriptions'), async ({ request }) => {
       forgotten = await request.json()
       devices = 0
@@ -286,4 +289,31 @@ test('a device with reminders on can turn them off', async () => {
 
   expect(await screen.findByRole('button', TURN_ON)).toBeInTheDocument()
   expect(forgotten).toEqual({ endpoint: ENDPOINT })
+})
+
+// The plan's own decision -- "a subscription re-posted by another account moves
+// to that account, so a shared phone reminds only its current user" -- has to
+// be reachable just by opening the screen, not only by tapping Turn off then
+// Turn on. A session that expired, or a different account signing in on this
+// phone, leaves the browser subscribed while the server's count is still 0.
+test('a subscribed browser catches the server up, and the count follows', async () => {
+  installPush({ permission: 'granted', subscribed: true })
+  serveKey()
+  devices = 0
+  let posted: unknown = null
+  server.use(
+    http.post(apiUrl('/push/subscriptions'), async ({ request }) => {
+      posted = await request.json()
+      devices = 1
+      return HttpResponse.json({ devices }, { status: 201 })
+    }),
+  )
+
+  renderScreen()
+
+  expect(await screen.findByText('Reminders are on for this device')).toBeInTheDocument()
+  expect(
+    await screen.findByText('Reminders go to 1 device on your account.'),
+  ).toBeInTheDocument()
+  expect(posted).toMatchObject({ endpoint: ENDPOINT })
 })

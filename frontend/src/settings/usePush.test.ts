@@ -124,6 +124,11 @@ test('a device that denied notifications is blocked', async () => {
 
 test('a permitted, subscribed device is on', async () => {
   installPush({ permission: 'granted', subscribed: true })
+  server.use(
+    http.post(apiUrl('/push/subscriptions'), () =>
+      HttpResponse.json({ devices: 1 }, { status: 201 }),
+    ),
+  )
 
   expect(await thisDevice()).toBe('on')
 })
@@ -134,6 +139,40 @@ test('a permitted device with no subscription is off', async () => {
   installPush({ permission: 'granted' })
 
   expect(await thisDevice()).toBe('off')
+})
+
+// The browser cannot see whether the server still agrees with it: a session
+// that expired, another account signing in on this same phone, or a dropped
+// subscription all leave the browser reading "on" while the server does not
+// remind it, or reminds someone else. The upsert is idempotent, so this is
+// how a shared phone's reminders end up on its current user without a manual
+// turn-off/turn-on.
+test('a device reading "on" re-posts its subscription, in case the server disagrees', async () => {
+  installPush({ permission: 'granted', subscribed: true })
+  let posted: unknown = null
+  server.use(
+    http.post(apiUrl('/push/subscriptions'), async ({ request }) => {
+      posted = await request.json()
+      return HttpResponse.json({ devices: 1 }, { status: 201 })
+    }),
+  )
+
+  expect(await thisDevice()).toBe('on')
+
+  expect(posted).toEqual({
+    endpoint: ENDPOINT,
+    keys: { p256dh: P256DH, auth: AUTH },
+    timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+  })
+})
+
+test('a device still reads "on" when the server cannot take the re-post', async () => {
+  installPush({ permission: 'granted', subscribed: true })
+  server.use(
+    http.post(apiUrl('/push/subscriptions'), () => new HttpResponse('boom', { status: 500 })),
+  )
+
+  expect(await thisDevice()).toBe('on')
 })
 
 // --- turning reminders on -------------------------------------------------------------

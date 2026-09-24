@@ -1,4 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useEffect } from 'react'
 import { api } from '../lib/api'
 import type { NewPushSubscription, PushDevices, PushPublicKey, PushUnsubscribe } from './types'
 
@@ -76,10 +77,29 @@ async function currentSubscription(): Promise<PushSubscription | null> {
   return (await registration?.pushManager.getSubscription()) ?? null
 }
 
+/**
+ * Where this browser stands, resyncing the server on the way.
+ *
+ * A granted, live subscription reads as `on` from the browser alone, but the
+ * browser cannot see whether the server still agrees: a session that expired,
+ * another account signing in on this same phone, or the push service dropping
+ * the subscription (a 404/410, or a rotated endpoint with no
+ * `pushsubscriptionchange` handler here yet) all leave the server not
+ * reminding this browser, or reminding someone else on it, while this browser
+ * still reads `on`. So whenever the browser says `on`, this re-posts the
+ * subscription; the server's upsert is idempotent, moving the endpoint to
+ * whichever account is signed in here now and refreshing its timezone. The
+ * re-post's own failure is swallowed: a background sync must not turn `on`
+ * into a check-failed screen.
+ */
 export async function thisDevice(): Promise<DeviceState> {
   if (Notification.permission === 'denied') return 'blocked'
   const subscription = await currentSubscription()
-  return Notification.permission === 'granted' && subscription !== null ? 'on' : 'off'
+  if (Notification.permission !== 'granted' || subscription === null) return 'off'
+  await api
+    .post<PushDevices>('/push/subscriptions', subscriptionBody(subscription))
+    .catch(() => null)
+  return 'on'
 }
 
 /** The server's VAPID public key, as the bytes `pushManager.subscribe` takes. */
@@ -87,6 +107,18 @@ function keyBytes(base64url: string): Uint8Array<ArrayBuffer> {
   const padding = '='.repeat((4 - (base64url.length % 4)) % 4)
   const base64 = (base64url + padding).replace(/-/g, '+').replace(/_/g, '/')
   return Uint8Array.from(atob(base64), (char) => char.charCodeAt(0))
+}
+
+/** The `POST /push/subscriptions` body for an already-subscribed browser. */
+function subscriptionBody(subscription: PushSubscription): NewPushSubscription {
+  const { keys } = subscription.toJSON()
+  return {
+    endpoint: subscription.endpoint,
+    keys: { p256dh: keys?.p256dh ?? '', auth: keys?.auth ?? '' },
+    // Reminder times are wall-clock, and this is the only thing that tells the
+    // server which wall.
+    timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+  }
 }
 
 /**
@@ -112,16 +144,8 @@ export async function subscribeThisDevice(): Promise<void> {
     applicationServerKey: keyBytes(key),
   })
 
-  const { keys } = subscription.toJSON()
-  const body: NewPushSubscription = {
-    endpoint: subscription.endpoint,
-    keys: { p256dh: keys?.p256dh ?? '', auth: keys?.auth ?? '' },
-    // Reminder times are wall-clock, and this is the only thing that tells the
-    // server which wall.
-    timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
-  }
   try {
-    await api.post<PushDevices>('/push/subscriptions', body)
+    await api.post<PushDevices>('/push/subscriptions', subscriptionBody(subscription))
   } catch (error) {
     // A browser subscription the server never stored would read as "on" here
     // and never be reminded. Undo it, so the button comes back.
@@ -167,7 +191,17 @@ export function usePushKey() {
 }
 
 export function useThisDevice() {
-  return useQuery({ queryKey: ['push', 'device'], queryFn: thisDevice })
+  const queryClient = useQueryClient()
+  const query = useQuery({ queryKey: ['push', 'device'], queryFn: thisDevice })
+  useEffect(() => {
+    // thisDevice() may just have re-posted this endpoint, which can change the
+    // server's device count (moved from another account, or freshly caught up
+    // after a drop). Sync the settings screen's count with it.
+    if (query.data === 'on') {
+      queryClient.invalidateQueries({ queryKey: ['settings', 'reminders'] })
+    }
+  }, [query.data, queryClient])
+  return query
 }
 
 function useDeviceChange(change: () => Promise<void>) {
