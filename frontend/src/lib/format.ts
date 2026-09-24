@@ -43,3 +43,18 @@ export function formatPercent(consumed: number, target: number): number {
   if (!target) return 0
   return Math.round((consumed / target) * 100)
 }
+
+/**
+ * `3 Aug 2026` from an ISO calendar date.
+ *
+ * Built from its parts rather than parsed, because `new Date('2026-08-01')` is
+ * UTC midnight — which is still 31 July anywhere west of Greenwich.
+ */
+export function formatDay(iso: string): string {
+  const [year, month, day] = iso.split('-').map(Number)
+  return new Intl.DateTimeFormat('en-IN', {
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric',
+  }).format(new Date(year, month - 1, day))
+}

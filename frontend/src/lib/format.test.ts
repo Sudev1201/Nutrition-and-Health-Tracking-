@@ -1,5 +1,5 @@
 import { expect, test } from 'vitest'
-import { formatAmount, formatPercent, formatWithUnit, unitLabel } from './format'
+import { formatAmount, formatDay, formatPercent, formatWithUnit, unitLabel } from './format'
 
 test('energy is rounded to whole kcal', () => {
   expect(formatAmount(2110.4, 'kcal')).toBe('2,110')
@@ -61,4 +61,13 @@ test('units that need no translation pass through', () => {
 
 test('an amount can be rendered with its unit for prose and screen readers', () => {
   expect(formatWithUnit(410, 'mg')).toBe('410 mg')
+})
+
+test('a calendar date reads as a day, month and year', () => {
+  expect(formatDay('2026-08-03')).toBe('3 Aug 2026')
+})
+
+test('a date is not shifted by the timezone it is read in', () => {
+  // `new Date('2026-08-01')` is UTC midnight, which is 31 July west of Greenwich.
+  expect(formatDay('2026-08-01')).toBe('1 Aug 2026')
 })

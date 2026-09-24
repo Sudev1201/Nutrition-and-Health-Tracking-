@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { Link } from 'react-router-dom'
 import {
   CartesianGrid,
   Line,
@@ -9,96 +9,160 @@ import {
   XAxis,
   YAxis,
 } from 'recharts'
-import { api } from '../lib/api'
+import { ApiError } from '../lib/api'
+import { formatAmount, formatDay } from '../lib/format'
+import { todayIso } from '../today/useToday'
 import { Button } from '../ui/Button'
 import { Card, CardTitle } from '../ui/Card'
-import { Field, NumberInput } from '../ui/fields'
-import { DemoDataBanner, Skeleton } from '../ui/feedback'
+import { Field, NumberInput, TextInput } from '../ui/fields'
+import { EmptyState, Skeleton } from '../ui/feedback'
+import { useAddWeighIn, useRemoveWeighIn, useWeight } from './useWeight'
 import type { WeightTrend } from './types'
 
-function useWeight() {
-  return useQuery({
-    queryKey: ['weight'],
-    queryFn: () => api.get<WeightTrend>('/weight'),
-    retry: false,
-  })
+// The profile's bounds. The energy equations are weight-based, so a typo here
+// would quietly skew every target.
+const MIN_KG = 20
+const MAX_KG = 300
+
+/** "losing about 0.3 kg a week", for a goal or an observed trend. */
+function rateWords(kgPerWeek: number): string {
+  if (Math.abs(kgPerWeek) < 0.05) return 'holding steady'
+  const direction = kgPerWeek < 0 ? 'losing' : 'gaining'
+  return `${direction} about ${Math.abs(kgPerWeek).toFixed(1)} kg a week`
 }
 
-function useAddWeighIn() {
-  const queryClient = useQueryClient()
-  return useMutation({
-    mutationFn: (weightKg: number) => api.post('/weight', { weight_kg: weightKg }),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['weight'] })
-      // A recalibrated calorie target changes today's figures too.
-      queryClient.invalidateQueries({ queryKey: ['targets'] })
-    },
-  })
-}
-
-export function WeightScreen() {
-  const weight = useWeight()
+function WeighInForm() {
   const addWeighIn = useAddWeighIn()
   const [entry, setEntry] = useState('')
+  const [date, setDate] = useState(todayIso)
 
-  if (weight.isPending) return <Skeleton className="h-64 w-full" />
-  if (weight.isError || weight.data === undefined) {
-    return (
-      <p role="alert" className="text-sm text-above-limit">
-        Your weight history could not be loaded. Please try again.
-      </p>
-    )
-  }
-
-  const data = weight.data
   const parsed = Number.parseFloat(entry)
-  const canSubmit = Number.isFinite(parsed) && parsed > 0
+  const valid = Number.isFinite(parsed) && parsed > MIN_KG && parsed <= MAX_KG
+  const invalid = entry.trim() !== '' && !valid
 
   return (
-    <section className="space-y-4">
-      <DemoDataBanner endpoint="GET /weight" />
-
-      <Card>
-        <CardTitle>Add this week’s weigh-in</CardTitle>
-        <div className="mt-2 flex items-end gap-3">
-          <div className="flex-1">
-            <Field label="Weight in kg">
-              {(fieldProps) => (
-                <NumberInput
-                  {...fieldProps}
-                  value={entry}
-                  onChange={(event) => setEntry(event.target.value)}
-                  placeholder="74.2"
-                />
-              )}
-            </Field>
-          </div>
-          <Button
-            variant="primary"
-            className="mb-4"
-            disabled={!canSubmit || addWeighIn.isPending}
-            onClick={() => {
-              addWeighIn.mutate(parsed)
-              setEntry('')
-            }}
-          >
-            Save
-          </Button>
-        </div>
-        <p className="text-xs text-text-muted">
-          Weekly is enough. The trend is smoothed across the last few weigh-ins so a day of
-          water weight doesn’t move your targets.
+    <Card>
+      <CardTitle>Add this week’s weigh-in</CardTitle>
+      <div className="mt-2 grid gap-x-3 sm:grid-cols-[1fr_1fr_auto] sm:items-end">
+        <Field
+          label="Weight in kg"
+          error={invalid ? `Please give a weight in kg between ${MIN_KG} and ${MAX_KG}.` : undefined}
+        >
+          {(fieldProps) => (
+            <NumberInput
+              {...fieldProps}
+              value={entry}
+              onChange={(event) => setEntry(event.target.value)}
+              placeholder="74.2"
+            />
+          )}
+        </Field>
+        <Field label="Date">
+          {(fieldProps) => (
+            <TextInput
+              {...fieldProps}
+              type="date"
+              value={date}
+              max={todayIso()}
+              onChange={(event) => setDate(event.target.value)}
+            />
+          )}
+        </Field>
+        <Button
+          variant="primary"
+          className="mb-4"
+          disabled={!valid || date === '' || addWeighIn.isPending}
+          onClick={() =>
+            // Cleared only once saved, so a failed save does not lose what was typed.
+            addWeighIn.mutate({ weight_kg: parsed, date }, { onSuccess: () => setEntry('') })
+          }
+        >
+          Save
+        </Button>
+      </div>
+      {addWeighIn.isError && (
+        <p role="alert" className="mb-2 text-sm text-above-limit">
+          That weigh-in could not be saved. Please try again.
         </p>
-      </Card>
+      )}
+      <p className="text-xs text-text-muted">
+        Weekly is enough. The trend is read across several weigh-ins, so a day of water weight
+        doesn’t trigger a calorie recalibration. A missed week can be filled in by changing
+        the date.
+      </p>
+    </Card>
+  )
+}
 
-      <Card>
-        <CardTitle>Trend</CardTitle>
+function Summary({ data }: { data: WeightTrend }) {
+  return (
+    <Card>
+      <CardTitle>Where you are</CardTitle>
+      <dl className="mt-2 grid grid-cols-2 gap-3 text-sm sm:grid-cols-4">
+        <div>
+          <dt className="text-text-muted">Smoothed weight</dt>
+          <dd className="font-medium">
+            {data.smoothed_kg === null ? 'No weigh-ins yet' : `${data.smoothed_kg} kg`}
+          </dd>
+        </div>
+        <div>
+          <dt className="text-text-muted">Your goal</dt>
+          <dd className="font-medium">{rateWords(data.expected_kg_per_week)}</dd>
+        </div>
+        <div>
+          <dt className="text-text-muted">Recent trend</dt>
+          <dd className="font-medium">
+            {data.observed_kg_per_week === null
+              ? 'Not enough weigh-ins yet'
+              : rateWords(data.observed_kg_per_week)}
+          </dd>
+        </div>
+        <div>
+          <dt className="text-text-muted">Calorie target</dt>
+          <dd className="font-medium">{formatAmount(data.calorie_target_kcal, 'kcal')} kcal a day</dd>
+        </div>
+      </dl>
+      {data.note !== null && <p className="mt-3 text-sm text-text-muted">{data.note}</p>}
+    </Card>
+  )
+}
+
+function Adjustment({ data }: { data: WeightTrend }) {
+  if (data.adjustment === null) return null
+  const { delta_kcal: delta, since, reason } = data.adjustment
+
+  return (
+    <Card>
+      <CardTitle>Your calorie target moved</CardTitle>
+      <p className="mt-1 text-sm">
+        <strong className="font-medium">
+          {delta > 0 ? '+' : ''}
+          {delta} kcal
+        </strong>{' '}
+        since {formatDay(since)}.
+      </p>
+      <p className="mt-1 text-sm text-text-muted">{reason}</p>
+    </Card>
+  )
+}
+
+function TrendChart({ data }: { data: WeightTrend }) {
+  return (
+    <Card>
+      <CardTitle>Trend</CardTitle>
+      {data.weigh_ins.length < 2 ? (
+        <p className="mt-2 text-sm text-text-muted">
+          Your trend line appears after your second weigh-in.
+        </p>
+      ) : (
+        // The list beside it carries the same figures for screen readers.
         <div className="mt-2 h-56 w-full" aria-hidden="true">
           <ResponsiveContainer width="100%" height="100%">
             <LineChart data={data.weigh_ins} margin={{ top: 8, right: 8, bottom: 0, left: -16 }}>
               <CartesianGrid stroke="var(--color-border)" vertical={false} />
               <XAxis
                 dataKey="date"
+                tickFormatter={(iso: string) => formatDay(iso)}
                 tick={{ fill: 'var(--color-text-muted)', fontSize: 11 }}
                 stroke="var(--color-border)"
               />
@@ -126,39 +190,94 @@ export function WeightScreen() {
             </LineChart>
           </ResponsiveContainer>
         </div>
+      )}
+    </Card>
+  )
+}
 
-        <table className="sr-only">
-          <caption>Weight at each weigh-in</caption>
-          <thead>
-            <tr>
-              <th scope="col">Date</th>
-              <th scope="col">Weight</th>
-            </tr>
-          </thead>
-          <tbody>
-            {data.weigh_ins.map((weighIn) => (
+function WeighInList({ data }: { data: WeightTrend }) {
+  const remove = useRemoveWeighIn()
+  const newestFirst = [...data.weigh_ins].reverse()
+
+  return (
+    <Card>
+      <CardTitle>Weigh-ins</CardTitle>
+      {newestFirst.length === 0 ? (
+        <p className="mt-2 text-sm text-text-muted">No weigh-ins yet.</p>
+      ) : (
+        <table className="mt-2 w-full text-sm">
+          <caption className="sr-only">Every weigh-in, newest first</caption>
+          <tbody className="divide-y divide-border">
+            {newestFirst.map((weighIn) => (
               <tr key={weighIn.date}>
-                <th scope="row">{weighIn.date}</th>
-                <td>{weighIn.weight_kg} kg</td>
+                <th scope="row" className="py-2 text-left font-normal">
+                  {formatDay(weighIn.date)}
+                </th>
+                <td className="py-2">{weighIn.weight_kg} kg</td>
+                <td className="py-2 text-right">
+                  <Button
+                    variant="quiet"
+                    aria-label={`Remove the weigh-in on ${formatDay(weighIn.date)}`}
+                    disabled={remove.isPending}
+                    onClick={() => remove.mutate(weighIn.date)}
+                  >
+                    Remove
+                  </Button>
+                </td>
               </tr>
             ))}
           </tbody>
         </table>
-      </Card>
-
-      {data.adjustment !== null && (
-        <Card>
-          <CardTitle>Your calorie target moved</CardTitle>
-          <p className="mt-1 text-sm">
-            <strong className="font-medium">
-              {data.adjustment.delta_kcal > 0 ? '+' : ''}
-              {data.adjustment.delta_kcal} kcal
-            </strong>{' '}
-            — now {data.calorie_target_kcal} kcal a day.
-          </p>
-          <p className="mt-1 text-sm text-text-muted">{data.adjustment.reason}</p>
-        </Card>
       )}
+      {remove.isError && (
+        <p role="alert" className="mt-2 text-sm text-above-limit">
+          That weigh-in could not be removed. Please try again.
+        </p>
+      )}
+    </Card>
+  )
+}
+
+export function WeightScreen() {
+  const weight = useWeight()
+
+  if (weight.isPending) return <Skeleton className="h-64 w-full" />
+
+  // A 404 means there is no profile yet: the trend starts from the profile's weight.
+  if (weight.error instanceof ApiError && weight.error.status === 404) {
+    return (
+      <EmptyState
+        title="Let’s set up your targets"
+        description="Your weight trend starts from the weight in your profile, so there is nothing to show until you have told us about yourself."
+        action={
+          <Link
+            to="/profile/about"
+            className="inline-flex min-h-11 items-center rounded-control border border-accent bg-accent px-4 text-sm font-medium text-surface"
+          >
+            Set up your profile
+          </Link>
+        }
+      />
+    )
+  }
+  if (weight.isError || weight.data === undefined) {
+    return (
+      <p role="alert" className="text-sm text-above-limit">
+        Your weight history could not be loaded. Please try again.
+      </p>
+    )
+  }
+
+  const data = weight.data
+  return (
+    <section className="space-y-4">
+      <WeighInForm />
+      <Summary data={data} />
+      <Adjustment data={data} />
+      <div className="grid gap-4 lg:grid-cols-2">
+        <TrendChart data={data} />
+        <WeighInList data={data} />
+      </div>
     </section>
   )
 }

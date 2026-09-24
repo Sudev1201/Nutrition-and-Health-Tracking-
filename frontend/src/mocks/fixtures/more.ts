@@ -12,13 +12,16 @@ export const WEIGHT_FIXTURE: WeightTrend = {
   ],
   smoothed_kg: 74.2,
   goal: 'lose',
-  expected_kg_per_week: -0.35,
-  calorie_target_kcal: 2110,
+  expected_kg_per_week: -0.4,
+  observed_kg_per_week: -0.1,
+  calorie_target_kcal: 2020,
   adjustment: {
     delta_kcal: -90,
+    since: '2026-08-16',
     reason:
-      'Weight has held flat for three weigh-ins against a 0.35 kg/week goal, so the target drops by a bounded step. It will never go below your BMR.',
+      'Your weight has fallen about 0.1 kg a week against a goal of losing about 0.4 kg a week, so your calorie target moves down a bounded step. It stays within 10% of what the formula gives and never goes below a safe floor.',
   },
+  note: 'Your target last moved on 16 August. The next reading needs three weigh-ins across at least two weeks after that.',
 }
 
 export const CYCLE_FIXTURE: CycleState = {
