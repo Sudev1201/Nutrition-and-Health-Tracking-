@@ -141,3 +141,15 @@ test('a man is not asked about periods', () => {
     validateStep('about', answers({ sex: 'male', age: '34', weight_kg: '74.2', activity: 'moderate' })),
   ).toBeNull()
 })
+
+// The spec's own example: the optional mid-morning snack should not nag someone
+// who rarely eats it. So its reminder starts off, and every other slot's on.
+test('a new questionnaire reminds about every meal but the mid-morning snack', () => {
+  expect(emptyAnswers().meal_times.map((meal) => [meal.slot, meal.reminder_on])).toEqual([
+    ['breakfast', true],
+    ['snack1', false],
+    ['lunch', true],
+    ['snack2', true],
+    ['dinner', true],
+  ])
+})

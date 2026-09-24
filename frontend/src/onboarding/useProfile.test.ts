@@ -86,3 +86,44 @@ test('the menstrual status is carried into the wizard state', () => {
   )
   expect(answers.menstrual_status).toBe('postmenopausal')
 })
+
+function mealTime(slot: string, reminder_on: boolean) {
+  return { slot, time: '08:00', weekend_time: null, reminder_on, is_enabled: true }
+}
+
+// The Reminders screen sets reminder_on, but it rides on the meal-time rows that
+// PUT /profile rewrites. Carried here, a save of any other section sends each
+// slot's setting back as it was.
+test('each slot keeps its saved reminder setting', () => {
+  const answers = answersFromProfile(
+    savedProfile({
+      meal_times: [
+        mealTime('breakfast', true),
+        mealTime('snack1', true),
+        mealTime('lunch', false),
+        mealTime('snack2', true),
+        mealTime('dinner', true),
+      ],
+    }),
+  )
+
+  expect(answers.meal_times.map((meal) => [meal.slot, meal.reminder_on])).toEqual([
+    ['breakfast', true],
+    ['snack1', true],
+    ['lunch', false],
+    ['snack2', true],
+    ['dinner', true],
+  ])
+})
+
+test('a slot with no saved row gets the default reminder', () => {
+  const answers = answersFromProfile(savedProfile({ meal_times: [] }))
+
+  expect(answers.meal_times.map((meal) => [meal.slot, meal.reminder_on])).toEqual([
+    ['breakfast', true],
+    ['snack1', false],
+    ['lunch', true],
+    ['snack2', true],
+    ['dinner', true],
+  ])
+})

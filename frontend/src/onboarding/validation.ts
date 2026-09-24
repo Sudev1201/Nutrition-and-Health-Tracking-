@@ -50,6 +50,15 @@ export const DEFAULT_MEAL_TIMES: Record<MealSlot, string> = {
   dinner: '20:30',
 }
 
+/**
+ * Whether a slot reminds when nothing is saved for it yet. The optional
+ * mid-morning snack should not nag someone who rarely eats it, so its reminder
+ * is opt-in. Mirrors the default the backend gives a new meal-time row.
+ */
+export function reminderOnByDefault(slot: MealSlot): boolean {
+  return slot !== 'snack1'
+}
+
 export function emptyAnswers(): OnboardingAnswers {
   return {
     sex: null,
@@ -70,6 +79,7 @@ export function emptyAnswers(): OnboardingAnswers {
       slot,
       time: DEFAULT_MEAL_TIMES[slot],
       weekend_time: null,
+      reminder_on: reminderOnByDefault(slot),
       // Five meals is the starting shape; someone who eats four turns a snack
       // off rather than having to switch four of them on.
       is_enabled: true,

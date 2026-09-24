@@ -638,3 +638,79 @@ def test_a_salty_day_lowers_the_next_two_days_sodium_ceilings(signed_in, salty_d
     sodium = nutrient(signed_in.get(f"/targets/today?date={after}").json(), "sodium")
     assert sodium["carried_in"] == 0
     assert sodium["target_effective"] == pytest.approx(2000)
+
+
+# --- a reminder setting survives a profile save ------------------------------
+#
+# `reminder_on` is the Reminders screen's setting, but it lives on the meal-time
+# rows that every profile save deletes and re-inserts. A save that leaves it out
+# keeps each slot's setting; a slot with none gets the default -- on, except the
+# mid-morning snack, which the spec says should not nag someone who rarely eats it.
+
+
+def meal_times_without_reminders() -> list[dict]:
+    """PROFILE's meal times as a client that predates `reminder_on` sends them."""
+    return [
+        {key: value for key, value in item.items() if key != "reminder_on"}
+        for item in PROFILE["meal_times"]
+    ]
+
+
+def reminders_saved(client) -> dict[str, bool]:
+    meal_times = client.get("/profile").json()["meal_times"]
+    return {item["slot"]: item["reminder_on"] for item in meal_times}
+
+
+def test_a_save_that_omits_reminders_keeps_each_slots_setting(signed_in):
+    lunch_off = [
+        {**item, "reminder_on": False} if item["slot"] == "lunch" else item
+        for item in PROFILE["meal_times"]
+    ]
+    signed_in.put("/profile", json={**PROFILE, "meal_times": lunch_off})
+
+    response = signed_in.put(
+        "/profile", json={**PROFILE, "meal_times": meal_times_without_reminders()}
+    )
+
+    assert response.status_code == 200
+    # Lunch was switched off, and the mid-morning snack came in off with PROFILE.
+    assert reminders_saved(signed_in) == {
+        "breakfast": True,
+        "snack1": False,
+        "lunch": False,
+        "snack2": True,
+        "dinner": True,
+    }
+
+
+def test_a_new_profile_has_no_mid_morning_snack_reminder(signed_in):
+    signed_in.put("/profile", json={**PROFILE, "meal_times": meal_times_without_reminders()})
+
+    assert reminders_saved(signed_in) == {
+        "breakfast": True,
+        "snack1": False,
+        "lunch": True,
+        "snack2": True,
+        "dinner": True,
+    }
+
+
+def test_a_reminder_the_payload_sets_is_honoured(signed_in):
+    """A saved setting fills a gap in the payload; it never overrules it."""
+    signed_in.put("/profile", json=PROFILE)
+    flipped = [
+        {**item, "reminder_on": not item["reminder_on"]}
+        if item["slot"] in {"snack1", "dinner"}
+        else item
+        for item in PROFILE["meal_times"]
+    ]
+
+    signed_in.put("/profile", json={**PROFILE, "meal_times": flipped})
+
+    assert reminders_saved(signed_in) == {
+        "breakfast": True,
+        "snack1": True,
+        "lunch": True,
+        "snack2": True,
+        "dinner": False,
+    }

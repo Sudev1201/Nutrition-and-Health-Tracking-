@@ -8,7 +8,7 @@ import type {
   OnboardingAnswers,
   UsualIntakeAnswer,
 } from './types'
-import { DEFAULT_MEAL_TIMES, emptyAnswers } from './validation'
+import { DEFAULT_MEAL_TIMES, emptyAnswers, reminderOnByDefault } from './validation'
 
 /** `GET /profile` — the saved answers, or null when onboarding is not done. */
 export interface SavedProfile {
@@ -91,6 +91,9 @@ export function answersFromProfile(profile: SavedProfile): OnboardingAnswers {
         // before a slot existed still opens with a usable time.
         time: item?.time ?? DEFAULT_MEAL_TIMES[slot],
         weekend_time: item?.weekend_time ?? null,
+        // The saved setting, so a save leaves the Reminders screen's choice as it
+        // was; a slot the saved profile has no row for gets a new slot's default.
+        reminder_on: item?.reminder_on ?? reminderOnByDefault(slot),
         // Defaults to on for a slot the saved profile has no row for, so a
         // profile written before this field existed still reads as five meals.
         is_enabled: item?.is_enabled ?? true,

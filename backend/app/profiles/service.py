@@ -87,7 +87,15 @@ def save_profile(db: Session, user: User, payload) -> Profile:
     Onboarding submits the whole questionnaire at once, so a save is a wholesale
     replacement rather than a merge — otherwise a condition the user unticked
     would linger and keep changing their targets.
+
+    The one exception is a slot's reminder. The Reminders screen sets it and the
+    questionnaire never asks, so a payload that leaves it out keeps the slot's
+    saved setting, and a slot with none gets the default.
     """
+    # Read before the delete below, which leaves no row to read it from. Kept as
+    # plain values: the bulk delete takes the session's row objects with it.
+    reminders = {row.slot: row.reminder_on for row in get_meal_times(db, user)}
+
     for model in CHILD_MODELS:
         db.execute(delete(model).where(model.user_id == user.id))
 
@@ -129,7 +137,7 @@ def save_profile(db: Session, user: User, payload) -> Profile:
                 slot=item.slot,
                 usual_time=_as_time(item.time),
                 weekend_time=_as_time(item.weekend_time) if item.weekend_time else None,
-                reminder_on=item.reminder_on,
+                reminder_on=_reminder_on(item, reminders),
                 is_enabled=item.is_enabled,
             )
             for item in payload.meal_times
@@ -182,6 +190,19 @@ def save_profile(db: Session, user: User, payload) -> Profile:
 
     db.flush()
     return profile
+
+
+def _reminder_on(item, saved: dict[str, bool]) -> bool:
+    """The payload's setting, else the slot's saved one, else a new slot's default."""
+    if item.reminder_on is not None:
+        return item.reminder_on
+    return saved.get(item.slot, _reminder_by_default(item.slot))
+
+
+def _reminder_by_default(slot: str) -> bool:
+    # The spec's own example: the optional mid-morning snack should not nag someone
+    # who rarely eats it, so its reminder is opt-in.
+    return slot != "snack1"
 
 
 def _as_time(value: str | datetime.time) -> datetime.time:

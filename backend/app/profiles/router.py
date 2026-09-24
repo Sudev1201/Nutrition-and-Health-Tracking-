@@ -30,7 +30,11 @@ class MealTimeIn(BaseModel):
     slot: str
     time: str = Field(pattern=r"^\d{2}:\d{2}$")
     weekend_time: str | None = Field(default=None, pattern=r"^\d{2}:\d{2}$")
-    reminder_on: bool = True
+    # None keeps the slot's saved setting, which belongs to the Reminders screen: a
+    # client that says nothing about it -- the wizard before plan 8, and a PWA still
+    # running that bundle -- must not switch every reminder back on. A slot with no
+    # saved setting gets the default: on, except the mid-morning snack.
+    reminder_on: bool | None = None
     # Defaults to on, so a client that predates the field still describes a
     # five-meal day rather than silently switching every slot off.
     is_enabled: bool = True

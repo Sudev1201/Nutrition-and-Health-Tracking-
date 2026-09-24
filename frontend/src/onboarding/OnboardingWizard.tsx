@@ -44,6 +44,8 @@ function useSaveProfile() {
       queryClient.invalidateQueries({ queryKey: ['weight'] })
       // Sex and menstrual status decide whether cycle tracking is offered at all.
       queryClient.invalidateQueries({ queryKey: ['cycle'] })
+      // The Reminders screen lists the slots a normal day has, at the times saved here.
+      queryClient.invalidateQueries({ queryKey: ['settings', 'reminders'] })
     },
   })
 }

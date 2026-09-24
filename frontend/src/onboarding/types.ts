@@ -138,6 +138,12 @@ export interface MealTimeAnswer {
   time: string
   weekend_time: string | null
   /**
+   * Whether this slot sends a reminder. The Reminders screen sets it; the wizard
+   * only carries it from the saved profile to the next save, since `PUT /profile`
+   * rewrites every meal-time row.
+   */
+  reminder_on: boolean
+  /**
    * Whether this slot is part of a normal day. Only the two snacks are ever
    * switched off — four or five meals means one or two snacks, and a day without
    * lunch is a skipped lunch rather than a meal-count preference.
