@@ -42,8 +42,9 @@ week's shared progress), food search, the onboarding questionnaire and profile, 
 logging, the meal plan, weight, cycle tracking, the weekly report and reminders.
 
 **Push reminders need a production build.** The browser subscribes only under the production
-service worker (`npm run build && npm run preview`), and the backend sends only with VAPID keys
-set and `SCHEDULER_ENABLED=true`. See `backend/.env.example`.
+service worker (`npm run build && npx vite preview --port 5173`, the origin the backend's CORS
+allows by default), and the backend sends with VAPID keys set and either `SCHEDULER_ENABLED=true`
+or `uv run python -m scripts.send_reminders` run from cron. See `backend/.env.example`.
 
 Mocks are on in dev and off in a production build. No fixture handlers are left, so the mock
 worker serves only opt-in demo auth. Override with `VITE_USE_MOCKS=false` (no worker at all) or
