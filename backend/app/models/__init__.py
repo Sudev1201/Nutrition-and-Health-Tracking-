@@ -7,6 +7,7 @@ otherwise `create_all`/`drop_all` and autogenerate silently miss tables.
 """
 
 from app.models.base import Base
+from app.models.cycle import CycleLog, CycleScreening, CycleSettings, CycleSymptom
 from app.models.diary import MealLog, MealSlotSkip
 from app.models.food import (
     Dish,
@@ -31,10 +32,16 @@ from app.models.profile import (
 )
 from app.models.reference import RdaReference, UpperLimit
 from app.models.user import User
+from app.models.weight import CalorieAdjustment, WeightLog
 
 __all__ = [
     "AvoidedFood",
     "Base",
+    "CalorieAdjustment",
+    "CycleLog",
+    "CycleScreening",
+    "CycleSettings",
+    "CycleSymptom",
     "Dish",
     "DishIngredient",
     "DishNutrient",
@@ -59,4 +66,5 @@ __all__ = [
     "UpperLimit",
     "User",
     "UsualIntakeItem",
+    "WeightLog",
 ]

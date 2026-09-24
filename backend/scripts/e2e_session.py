@@ -14,8 +14,8 @@ out already holding a valid cookie, exactly as it would after signing in.
 Usage:
     uv run python -m scripts.e2e_session [--reset]
 
-`--reset` deletes the user's profile and diary rows so a run starts from
-onboarding. It never touches any user but this one.
+`--reset` deletes everything the user has logged, planned and answered, so a run
+starts from onboarding. It never touches any user but this one.
 """
 
 import argparse
@@ -27,7 +27,9 @@ from sqlalchemy import delete, select
 from app.auth.session import create_session_token
 from app.config import settings
 from app.db import SessionLocal
+from app.models.cycle import CycleLog, CycleScreening, CycleSettings, CycleSymptom
 from app.models.diary import MealLog, MealSlotSkip
+from app.models.plan import MealPlan
 from app.models.profile import (
     AvoidedFood,
     FavouriteIngredient,
@@ -39,14 +41,26 @@ from app.models.profile import (
     UsualIntakeItem,
 )
 from app.models.user import User
+from app.models.weight import CalorieAdjustment, WeightLog
 
 # Recognisable in a database dump, and unmistakably not a real person.
 E2E_GOOGLE_SUB = "e2e-playwright-user"
 E2E_EMAIL = "e2e@playwright.invalid"
 
+# Everything the walk writes. Each is keyed on user_id; meal_plan_items goes with
+# its plan through the foreign key's ON DELETE CASCADE. Missing a table here means
+# a second run starts from the first run's leftovers -- a weigh-in history that
+# grows every run, or cycle tracking already switched on.
 OWNED_MODELS = (
     MealLog,
     MealSlotSkip,
+    MealPlan,
+    WeightLog,
+    CalorieAdjustment,
+    CycleLog,
+    CycleSymptom,
+    CycleScreening,
+    CycleSettings,
     HealthCondition,
     Medication,
     MealSlotTime,

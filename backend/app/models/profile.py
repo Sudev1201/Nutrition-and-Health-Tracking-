@@ -38,6 +38,11 @@ class Profile(TimestampedBase):
     # the actual cereal:legume:milk ratio in the diary.
     cereal_dominant: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
 
+    # menstruating | postmenopausal. Null for men, and for a woman's profile saved
+    # before the question existed, which the targets read as "not postmenopausal".
+    # ICMR publishes no postmenopausal iron figure; this is what selects the IOM one.
+    menstrual_status: Mapped[str | None] = mapped_column(String(16), nullable=True)
+
 
 class HealthCondition(TimestampedBase):
     __tablename__ = "health_conditions"
