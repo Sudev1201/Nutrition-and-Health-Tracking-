@@ -1,7 +1,7 @@
 import { http, HttpResponse } from 'msw'
 import type { RequestHandler } from 'msw'
 import { apiUrl } from '../apiUrl'
-import { CYCLE_FIXTURE, REMINDERS_FIXTURE } from '../fixtures/more'
+import { REMINDERS_FIXTURE } from '../fixtures/more'
 import { REPORT_FIXTURE } from '../fixtures/report'
 import { demoAuthHandlers } from './demoAuth'
 
@@ -9,9 +9,9 @@ import { demoAuthHandlers } from './demoAuth'
  * Handlers for endpoints the backend has NOT built yet.
  *
  * Nothing here shadows a real endpoint. Auth, households, food search, the whole
- * tracking loop — profile, targets and diary — the meal planner and weight exist
- * in FastAPI, so requests to them fall through to the real server in dev
- * (`onUnhandledRequest: 'bypass'`) and are stubbed per-test in Vitest.
+ * tracking loop — profile, targets and diary — the meal planner, weight and
+ * cycle exist in FastAPI, so requests to them fall through to the real server
+ * in dev (`onUnhandledRequest: 'bypass'`) and are stubbed per-test in Vitest.
  *
  * These handlers are the proposed HTTP contract for the plans still outstanding.
  * When a plan implements one, delete its handler and its screen's
@@ -23,10 +23,6 @@ export const handlers: RequestHandler[] = [
 
   // Plan 8 — the weekly report.
   http.get(apiUrl('/reports/week'), () => HttpResponse.json(REPORT_FIXTURE)),
-
-  // Plan 7 — cycle.
-  http.get(apiUrl('/cycle'), () => HttpResponse.json(CYCLE_FIXTURE)),
-  http.patch(apiUrl('/cycle'), () => HttpResponse.json(CYCLE_FIXTURE)),
 
   // Plan 8 — per-slot reminder scheduling. The meal *times* themselves are saved
   // with the profile and are real; toggling reminders is not wired up yet.

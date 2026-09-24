@@ -25,13 +25,17 @@ export const WEIGHT_FIXTURE: WeightTrend = {
 }
 
 export const CYCLE_FIXTURE: CycleState = {
+  eligible: true,
+  ineligible_reason: null,
   enabled: true,
+  has_history: true,
   last_period_start: '2026-08-14',
-  logs: [
-    { date: '2026-08-14', flow: 'medium' },
-    { date: '2026-08-15', flow: 'heavy' },
-    { date: '2026-08-16', flow: 'medium' },
+  days: [
+    { date: '2026-08-16', flow: 'medium', symptoms: [] },
+    { date: '2026-08-15', flow: 'heavy', symptoms: ['cramps'] },
+    { date: '2026-08-14', flow: 'medium', symptoms: ['bloating', 'cramps'] },
   ],
+  screening: null,
   coaching: [
     {
       id: 'coffee-timing',
@@ -41,20 +45,20 @@ export const CYCLE_FIXTURE: CycleState = {
     },
     {
       id: 'vitamin-c',
-      title: 'Pair iron-rich meals with lemon, tomato, tamarind or guava',
-      body: 'Vitamin C markedly improves absorption of the non-haem iron in a rice-and-dal meal. This changes what to eat alongside, not how much iron you need.',
+      title: 'Pair iron-rich meals with lemon, tomato, tamarind, amla or guava',
+      body: 'Around your period, have something rich in vitamin C with the meal that carries your iron. This changes what to eat alongside, not how much iron you need.',
+      evidence: 'moderate',
+    },
+    {
+      id: 'ginger',
+      title: 'Dry ginger (sukku), 750–2,000 mg a day on days 1–3',
+      body: 'About half to one level teaspoon of dry ginger powder a day, on the first three days only. Painkillers such as ibuprofen still work better than any food. This is not a substitute for treatment.',
       evidence: 'moderate',
     },
     {
       id: 'calcium',
       title: 'Calcium at 1,000–1,200 mg a day',
-      body: 'The only nutrient both ACOG and RCOG endorse for PMS. Typical intake among Indian women is around 270–500 mg. The trial took three cycles to show benefit, so give it time.',
-      evidence: 'moderate',
-    },
-    {
-      id: 'ginger',
-      title: 'Dry ginger (sukku) 750–2,000 mg on days 1–3',
-      body: 'Comparable to mefenamic acid and ibuprofen in head-to-head trials for period pain. NSAIDs still outperform every dietary option — this is not a substitute for treatment.',
+      body: 'The only nutrient both ACOG and RCOG endorse for PMS. The trial took three cycles to show benefit, so give it time.',
       evidence: 'moderate',
     },
   ],
