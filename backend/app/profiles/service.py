@@ -101,6 +101,9 @@ def save_profile(db: Session, user: User, payload) -> Profile:
         "pace": payload.pace,
         "diet_type": payload.diet_type,
         "cereal_dominant": payload.cereal_dominant,
+        # Only a woman's profile carries one. A profile switched to male must not
+        # keep a status that would select a female iron row if switched back.
+        "menstrual_status": payload.menstrual_status if payload.sex == "female" else None,
     }
 
     if profile is None:

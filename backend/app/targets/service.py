@@ -39,6 +39,17 @@ from app.weight import service as weight
 # gives exact values without unbounded recursion into the user's whole history.
 COMPENSATION_WINDOW_DAYS = 4
 
+# ICMR-NIN 2020 publishes no postmenopausal category. The seed stores the IOM
+# figure the spec falls back to as the female 60+ iron row, and a postmenopausal
+# woman of any age reads that row -- for iron alone. Switching her whole band
+# would drop the fourteen nutrients the 60+ band does not carry.
+POSTMENOPAUSAL_IRON_BAND = "60+"
+IOM_SOURCE = "IOM"
+
+# After menopause there is no route to shed iron, so a day this close to the
+# upper limit is worth a word before it becomes a habit.
+IRON_LIMIT_SHARE = 0.8
+
 # The targets that move with the weight-driven offset: energy itself, the
 # macros `build_targets` derives from it, and the energy-scaled B vitamins. A
 # window day whose offset differs from target_date's must be costed against
@@ -112,10 +123,35 @@ def load_references(db: Session, profile: Profile) -> dict[str, ReferenceValue]:
         )
     ).all()
 
-    return {
-        nutrient.code: ReferenceValue(ear=row.ear, rda=row.rda, ai=row.ai)
+    references = {
+        nutrient.code: ReferenceValue(ear=row.ear, rda=row.rda, ai=row.ai, source=row.source)
         for row, nutrient in rows
     }
+    if _is_postmenopausal(profile) and band != POSTMENOPAUSAL_IRON_BAND:
+        iron = _iron_reference(db, profile.sex, POSTMENOPAUSAL_IRON_BAND)
+        if iron is not None:
+            references["iron"] = iron
+    return references
+
+
+def _is_postmenopausal(profile: Profile) -> bool:
+    return profile.sex == "female" and profile.menstrual_status == "postmenopausal"
+
+
+def _iron_reference(db: Session, sex: str, band: str) -> ReferenceValue | None:
+    row = db.scalars(
+        select(RdaReference)
+        .join(Nutrient, Nutrient.id == RdaReference.nutrient_id)
+        .where(
+            Nutrient.code == "iron",
+            RdaReference.sex == sex,
+            RdaReference.age_band == band,
+            RdaReference.activity_level.is_(None),
+        )
+    ).one_or_none()
+    if row is None:
+        return None
+    return ReferenceValue(ear=row.ear, rda=row.rda, ai=row.ai, source=row.source)
 
 
 def load_upper_limits(db: Session) -> dict[str, float]:
@@ -178,6 +214,49 @@ def _recalibration_warnings(applied_offset_kcal: float) -> list[Warning]:
                 f"Your calorie target is {abs(round(applied_offset_kcal))} kcal {direction} "
                 "than the formula gives, because your weigh-ins have drifted from your goal. "
                 "The Weight screen has the detail."
+            ),
+        )
+    ]
+
+
+def _framework_warnings(references: dict[str, ReferenceValue]) -> list[Warning]:
+    """The visible note the spec requires when iron is not ICMR's figure."""
+    iron = references.get("iron")
+    if iron is None or iron.source != IOM_SOURCE:
+        return []
+    figure = iron.rda if iron.rda is not None else iron.ai
+    return [
+        Warning(
+            kind="reference-framework",
+            message=(
+                f"Your iron target is {figure:g} mg, the IOM figure for women after "
+                "menopause. ICMR-NIN 2020 publishes no postmenopausal value, and its 29 mg "
+                "figure for women averages menstrual loss, which no longer applies."
+            ),
+        )
+    ]
+
+
+def _iron_limit_warnings(
+    references: dict[str, ReferenceValue],
+    targets: dict[str, Target],
+    consumed: dict[str, float],
+) -> list[Warning]:
+    """Flag a day's iron nearing the upper limit, for someone with no way to shed it."""
+    reference = references.get("iron")
+    iron = targets.get("iron")
+    if reference is None or reference.source != IOM_SOURCE or iron is None or iron.tul is None:
+        return []
+    eaten = consumed.get("iron", 0.0)
+    if eaten < iron.tul * IRON_LIMIT_SHARE:
+        return []
+    return [
+        Warning(
+            kind="approaching-limit",
+            message=(
+                f"Today's iron is {eaten:.0f} mg, close to the {iron.tul:g} mg upper limit. "
+                "After menopause the body has no way to shed extra iron, so check "
+                "supplements and fortified foods before adding more."
             ),
         )
     ]
@@ -352,6 +431,8 @@ def resolve_day(
         warnings=[
             *overlay.warnings,
             *_recalibration_warnings(targets["energy"].rda - formula),
+            *_framework_warnings(references),
+            *_iron_limit_warnings(references, targets, consumed_today),
         ],
         hold_steady=overlay.compensation_disabled,
     )

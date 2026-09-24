@@ -221,6 +221,48 @@ def reference_data(db) -> Dish:
 
 
 @pytest.fixture
+def iron_reference(db, reference_data) -> Nutrient:
+    """Iron as the seed carries it for women: ICMR's 29 mg up to 59, and the IOM
+    figure of 8 mg stored as the female 60+ row -- the value the spec falls back to
+    after menopause, since ICMR-NIN 2020 publishes no postmenopausal category."""
+    iron = Nutrient(
+        code="iron",
+        display_name="Iron",
+        unit="mg",
+        category="mineral",
+        is_compensable=True,
+        compensation_days=2,
+        is_excess_sensitive=True,
+    )
+    db.add(iron)
+    db.flush()
+    for sex, band, ear, rda, source in (
+        ("female", "18-59", 15, 29, "ICMR-NIN-2020"),
+        ("female", "60+", 5, 8, "IOM"),
+        ("male", "18-59", 11, 19, "ICMR-NIN-2020"),
+    ):
+        db.add(
+            RdaReference(
+                nutrient_id=iron.id,
+                sex=sex,
+                age_band=band,
+                activity_level=None,
+                ear=ear,
+                rda=rda,
+                ai=None,
+                source=source,
+            )
+        )
+    db.add(
+        UpperLimit(
+            nutrient_id=iron.id, value=45.0, supplemental_only=False, source="ICMR-2018-TUL"
+        )
+    )
+    db.flush()
+    return iron
+
+
+@pytest.fixture
 def api_client(db) -> TestClient:
     """A client whose requests run inside the test transaction."""
     app.dependency_overrides[get_db] = lambda: db

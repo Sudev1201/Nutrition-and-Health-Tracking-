@@ -82,6 +82,9 @@ class ProfileIn(BaseModel):
 
     diet_type: str
     cereal_dominant: bool = False
+    # Selects the iron figure: ICMR's 29 mg averages menstrual loss, so after
+    # menopause the IOM figure applies. Ignored -- stored as null -- for a man.
+    menstrual_status: str | None = Field(default=None, pattern="^(menstruating|postmenopausal)$")
 
     conditions: list[str] = []
     medications: list[MedicationIn] = []
@@ -136,6 +139,7 @@ class ProfileOut(BaseModel):
     pace: str | None
     diet_type: str
     cereal_dominant: bool
+    menstrual_status: str | None
     conditions: list[str]
     medications: list[MedicationOut]
     meal_times: list[MealTimeOut]
@@ -166,6 +170,7 @@ def _to_out(db: Session, user: User) -> ProfileOut:
         pace=profile.pace,
         diet_type=profile.diet_type,
         cereal_dominant=profile.cereal_dominant,
+        menstrual_status=profile.menstrual_status,
         conditions=service.get_conditions(db, user),
         medications=[
             MedicationOut(name=item.name, time=_hhmm(item.taken_at))
