@@ -21,7 +21,10 @@ export interface NutrientBarProps {
    * is silence rather than zero and the bar must not imply the user ate none.
    */
   coverage?: number
-  /** What the ledger added to today's target. */
+  /**
+   * What the ledger added to today's target. Negative when a harmful surplus
+   * lowered it: a 4,000 mg sodium Sunday takes 600 mg off Monday's ceiling.
+   */
   carriedIn?: number
   /** The weekday that carry came from, e.g. "Friday". */
   carriedFrom?: string
@@ -136,6 +139,15 @@ export function NutrientBar({
         {carriedIn !== undefined && carriedIn > 0 && carriedFrom !== undefined && (
           <span className="text-carried">
             {`+${formatAmount(carriedIn, unit)} ${unitLabel(unit)} carried from ${carriedFrom}`}
+          </span>
+        )}
+        {/*
+          A lowered target needs its reason as much as a raised one: a sodium
+          ceiling that drops to 1,400 mg with no word of why reads as a bug.
+        */}
+        {carriedIn !== undefined && carriedIn < 0 && carriedFrom !== undefined && (
+          <span className="text-carried">
+            {`Lowered by ${formatWithUnit(-carriedIn, unit)} after ${carriedFrom}`}
           </span>
         )}
         {/*

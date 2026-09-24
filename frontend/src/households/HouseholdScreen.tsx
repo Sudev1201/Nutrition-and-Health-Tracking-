@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { useSession } from '../auth/useSession'
+import { weekStartIso } from '../plan/usePlan'
 import { Badge } from '../ui/Badge'
 import { Button } from '../ui/Button'
 import { Card, CardTitle } from '../ui/Card'
@@ -9,10 +10,12 @@ import {
   useAcceptInvite,
   useCreateHousehold,
   useHousehold,
+  useHouseholdProgress,
   useInvite,
   useLeaveHousehold,
   useUpdateVisibility,
 } from './useHousehold'
+import type { MemberProgress } from './useHousehold'
 
 function NoHousehold() {
   const createHousehold = useCreateHousehold()
@@ -78,6 +81,70 @@ function NoHousehold() {
   )
 }
 
+/**
+ * One member's week as one sentence. Counts of days only: the backend sends no
+ * nutrient and no target, because a target is health data -- a 1,500 mg sodium
+ * cap says hypertension as plainly as the diagnosis would.
+ */
+function progressLine(member: MemberProgress): string {
+  if (!member.shared) return `${member.name}: not sharing progress`
+  const tracked = member.tracked_days
+  const met = member.nutrient_days_met
+  const measured = member.nutrient_days_measured
+  if (tracked === null || met === null || measured === null) {
+    return `${member.name}: has not set up a profile yet`
+  }
+  if (tracked === 0) return `${member.name}: no days logged yet`
+  const days = tracked === 1 ? '1 day' : `${tracked} days`
+  return `${member.name}: on track ${met} of ${measured} nutrient-days, ${days} logged`
+}
+
+/** The week in progress, for everyone in the household who shares it. */
+function ProgressCard({ sharingMine }: { sharingMine: boolean }) {
+  const progress = useHouseholdProgress(weekStartIso())
+
+  // Null is a 404 or a 422. A 404: the household went between the two requests,
+  // left from another device, say, and the household query catches up on its own.
+  // A 422: the week has not begun where the account keeps time, because this
+  // browser's calendar reached Sunday first. Either way there is nothing to show yet.
+  if (progress.data === null) return null
+
+  return (
+    <Card className="mt-6">
+      <CardTitle>This week so far</CardTitle>
+      <p className="mt-1 text-xs text-text-muted">
+        Days logged, and nutrient-days on track out of those measured: a nutrient-day is
+        one nutrient on one logged day. A day counts once it is over. Nobody’s targets or
+        health details appear here.
+      </p>
+      {progress.isPending && <Skeleton className="mt-3 h-16 w-full" />}
+      {progress.isError && (
+        <p role="alert" className="mt-3 text-sm text-above-limit">
+          This week’s progress could not be loaded.
+        </p>
+      )}
+      {progress.data && (
+        <ul aria-label="Household progress" className="mt-2 divide-y divide-border">
+          {progress.data.members.map((member) => (
+            <li key={member.user_id} className="py-2 text-sm">
+              {progressLine(member)}
+              {/*
+                Your own row always shows you your figures, so with sharing off it
+                has to say nobody else sees them, or it reads as if they do.
+              */}
+              {member.is_me && !sharingMine && (
+                <span className="block text-xs text-text-muted">
+                  Only you can see this: you are not sharing your progress.
+                </span>
+              )}
+            </li>
+          ))}
+        </ul>
+      )}
+    </Card>
+  )
+}
+
 export function HouseholdScreen() {
   const { data: household, isLoading } = useHousehold()
   const { user } = useSession()
@@ -116,6 +183,8 @@ export function HouseholdScreen() {
           </li>
         ))}
       </ul>
+
+      <ProgressCard sharingMine={me?.share_progress ?? true} />
 
       <div className="mt-6 grid gap-6 md:grid-cols-2">
         <Card>

@@ -147,3 +147,40 @@ test('a fully measured nutrient carries no caveat', () => {
   expect(screen.queryByText(/not measured/i)).not.toBeInTheDocument()
   expect(screen.queryByText(/of what you ate/i)).not.toBeInTheDocument()
 })
+
+// --- a lowered target -----------------------------------------------------------
+//
+// A harmful surplus lowers the next two days: a 4,000 mg sodium Sunday takes
+// 600 mg off each of Monday's and Tuesday's 2,000 mg ceilings. A ceiling that
+// drops overnight with no reason given reads as a bug.
+
+// Sodium has no ICMR upper limit of its own, so the API sends `tul: null`.
+const SODIUM = { name: 'Sodium', unit: 'mg', ear: null, tul: null, kind: 'ceiling' } as const
+
+test('says what lowered a ceiling, and after which day', () => {
+  render(
+    <NutrientBar {...SODIUM} consumed={900} target={1400} carriedIn={-600} carriedFrom="Sunday" />,
+  )
+
+  expect(screen.getByText('Lowered by 600 mg after Sunday')).toBeInTheDocument()
+})
+
+// A negative carry is not a carry to make up, and a sign in front of a number
+// is easy to miss.
+test('does not present a lowered ceiling as something carried', () => {
+  render(
+    <NutrientBar {...SODIUM} consumed={900} target={1400} carriedIn={-600} carriedFrom="Sunday" />,
+  )
+
+  expect(screen.queryByText(/carried from/i)).not.toBeInTheDocument()
+})
+
+// The day is judged against the lowered ceiling, which is its limit: 1,500 mg is
+// under Sunday's 2,000 mg but past today's 1,400 mg.
+test('judges the day against the lowered ceiling', () => {
+  render(
+    <NutrientBar {...SODIUM} consumed={1500} target={1400} carriedIn={-600} carriedFrom="Sunday" />,
+  )
+
+  expect(screen.getByText('past the upper limit')).toBeInTheDocument()
+})

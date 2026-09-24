@@ -79,6 +79,40 @@ test('surfaces the levothyroxine timing note', async () => {
 })
 
 /*
+ * The day after a 4,000 mg sodium Sunday, the ceiling is 600 mg lower. Today
+ * says why, beside the calcium carry that raised a target, which it still shows.
+ * The real API sends `tul: null` for sodium (ICMR set no upper limit), so the
+ * lowered ceiling is what the day is judged by. The fixture's `tul: 2000` would
+ * hide that.
+ */
+test('says why a ceiling was lowered, beside a target that was raised', async () => {
+  server.use(
+    http.get(apiUrl('/targets/today'), () =>
+      HttpResponse.json({
+        ...TODAY_FIXTURE,
+        nutrients: TODAY_FIXTURE.nutrients.map((nutrient) =>
+          nutrient.code === 'sodium'
+            ? {
+                ...nutrient,
+                tul: null,
+                target_effective: 1400,
+                carried_in: -600,
+                carried_from: 'Sunday',
+                consumed: 900,
+              }
+            : nutrient,
+        ),
+      }),
+    ),
+  )
+  renderScreen()
+
+  expect(await screen.findByText('Lowered by 600 mg after Sunday')).toBeInTheDocument()
+  expect(screen.getByText('900 / 1,400 mg')).toBeInTheDocument()
+  expect(screen.getByText('+180 mg carried from Friday')).toBeInTheDocument()
+})
+
+/*
  * The counter-intuitive rule, locked in. ICMR deliberately set NO upper limit for
  * B12, so 7.5 µg against a 2.2 µg RDA -- 340% -- must not be flagged. Sodium at
  * 2,680 mg against a 2,000 mg ceiling is the only alarm on this day. A future
