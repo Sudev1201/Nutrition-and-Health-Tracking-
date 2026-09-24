@@ -9,6 +9,7 @@ from app.households.router import router as households_router
 from app.planner.router import router as planner_router
 from app.profiles.router import router as profile_router
 from app.targets.router import router as targets_router
+from app.weight.router import router as weight_router
 
 app = FastAPI(title="healthMonitor API")
 
@@ -27,6 +28,7 @@ app.include_router(profile_router)
 app.include_router(targets_router)
 app.include_router(diary_router)
 app.include_router(planner_router)
+app.include_router(weight_router)
 
 
 @app.get("/health")

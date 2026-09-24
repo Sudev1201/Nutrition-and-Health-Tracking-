@@ -13,6 +13,7 @@ from app.models.profile import AvoidedFood, FavouriteIngredient
 from app.models.user import User
 from app.profiles import baseline as baseline_service
 from app.profiles import service
+from app.weight import service as weight
 
 router = APIRouter(prefix="/profile", tags=["profile"])
 
@@ -218,6 +219,14 @@ def read_profile(
     return _to_out(db, user)
 
 
+def _energy_basis(goal: str, pace: str | None, activity: str) -> tuple[str, str | None, str]:
+    """What the energy formula reads from the profile, besides the body itself.
+
+    A pace left over on a maintain goal changes nothing, so it is not a change.
+    """
+    return goal, pace if goal != "maintain" else None, activity
+
+
 @router.put("", response_model=ProfileOut)
 def save_profile(
     payload: ProfileIn,
@@ -248,7 +257,26 @@ def save_profile(
             "Skip them for a day instead.",
         )
 
+    existing = service.get_profile(db, user)
+    previous = (
+        _energy_basis(existing.goal, existing.pace, existing.activity)
+        if existing is not None
+        else None
+    )
+
     service.save_profile(db, user, payload)
+
+    today = local_today(user)
+    # A step was read against the old goal; under a new one it says nothing.
+    if previous is not None and previous != _energy_basis(
+        payload.goal, payload.pace, payload.activity
+    ):
+        weight.reset_adjustment(db, user, today)
+    # The profile's weight is the latest weigh-in, so a changed weight is a weigh-in.
+    # That is also how onboarding records the first one the trend starts from.
+    if weight.latest_weight(db, user) != payload.weight_kg:
+        weight.record_weigh_in(db, user, today, payload.weight_kg)
+
     db.commit()
     return _to_out(db, user)
 
