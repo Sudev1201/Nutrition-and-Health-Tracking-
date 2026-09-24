@@ -1,8 +1,10 @@
-"""Resolve a user's targets for one day.
+"""Resolve a user's targets for one day, and walk the compensation ledger.
 
 This is where the pure `nutrition_core` functions meet the database: reference
 rows in, a day's targets out, with the compensation ledger recomputed from the
-diary rather than stored as a running total.
+diary rather than stored as a running total. `walk_ledger` is that
+recomputation. Today reads one day of it through `resolve_day`; the weekly
+report reads a whole week of it in one pass.
 """
 
 import datetime
@@ -23,8 +25,8 @@ from app.nutrition_core.compensation import (
     effective_target,
     plan_carry,
 )
-from app.nutrition_core.conditions import Warning, apply_conditions
-from app.nutrition_core.energy import energy_target
+from app.nutrition_core.conditions import OverlayResult, Warning, apply_conditions
+from app.nutrition_core.energy import Body, energy_target
 from app.nutrition_core.recalibration import lowest_target
 from app.nutrition_core.targets import (
     ENERGY_SCALED_REFERENCES,
@@ -53,8 +55,8 @@ IRON_LIMIT_SHARE = 0.8
 
 # The targets that move with the weight-driven offset: energy itself, the
 # macros `build_targets` derives from it, and the energy-scaled B vitamins. A
-# window day whose offset differs from target_date's must be costed against
-# its own figure for these -- never against target_date's stepped one.
+# day whose offset differs from the context date's must be costed against its
+# own figure for these -- never against the context date's stepped one.
 _ENERGY_DERIVED_CODES = (
     frozenset({"energy", "fibre", "carbohydrate", "fat", "saturated_fat", "free_sugar"})
     | ENERGY_SCALED_REFERENCES
@@ -90,6 +92,33 @@ class DayTargets:
     # warfarin. The ledger already honours this through `_policies`; the planner
     # reads it here so "hold steady" is decided in one place.
     hold_steady: frozenset[str] = frozenset()
+
+
+@dataclass(frozen=True)
+class TargetContext:
+    """Everything a day's targets are built from, loaded once per request.
+
+    Only the recalibration offset changes from one day of a walk to the next, and
+    `base_targets_on` reads that per day. The profile, the reference rows, the
+    condition overlay and the ledger's policies are the context date's.
+    """
+
+    profile: Profile
+    body: Body
+    formula: float  # energy_target(body, goal, pace)
+    references: dict[str, ReferenceValue]
+    upper_limits: dict[str, float]
+    # The targets at the context date, its warnings, and compensation_disabled.
+    overlay: OverlayResult
+    nutrients: dict[str, Nutrient]
+    # Built with floors={"energy": lowest_target(body, formula)}.
+    policies: dict[str, NutrientPolicy]
+    # The offset in force on the context date, and `build_targets` at that
+    # offset before the overlay. A target the overlay left alone is the very
+    # object `built` holds, which is how `base_targets_on` tells a code only the
+    # offset moved from one a condition set.
+    energy_offset_kcal: float
+    built: dict[str, Target]
 
 
 def age_band(age: int) -> str:
@@ -278,6 +307,224 @@ def _iron_limit_warnings(
     ]
 
 
+def _built_at(
+    profile: Profile,
+    body: Body,
+    references: dict[str, ReferenceValue],
+    upper_limits: dict[str, float],
+    offset_kcal: float,
+) -> dict[str, Target]:
+    return build_targets(
+        body,
+        goal=profile.goal,
+        pace=profile.pace,
+        cereal_dominant=profile.cereal_dominant,
+        references=references,
+        upper_limits=upper_limits,
+        energy_offset_kcal=offset_kcal,
+    )
+
+
+def load_context(db: Session, user: User, on_date: datetime.date) -> TargetContext | None:
+    """What `on_date`'s targets are built from; None when there is no profile."""
+    profile = profiles.get_profile(db, user)
+    if profile is None:
+        return None
+
+    body = profiles.body_of(profile)
+    formula = energy_target(body, goal=profile.goal, pace=profile.pace)
+    references = load_references(db, profile)
+    upper_limits = load_upper_limits(db)
+    # The recalibration in force on this date, so a past day keeps the target it
+    # had and a step taken today does not re-cost yesterday.
+    offset = weight.offset_on(db, user, on_date)
+    built = _built_at(profile, body, references, upper_limits, offset)
+
+    overlay = apply_conditions(
+        built,
+        conditions=profiles.get_conditions(db, user),
+        medications=[
+            (item.name, item.taken_at.strftime("%H:%M"))
+            for item in profiles.get_medications(db, user)
+        ],
+    )
+    nutrients = load_nutrients(db)
+    # The ledger may lower energy after a surplus, but never through the floor a
+    # recalibration respects. Carries from two surplus days add up, which without
+    # this could take the day to 40% of its target -- far under BMR -- and the
+    # planner sizes portions from that figure.
+    policies = _policies(
+        overlay.targets,
+        nutrients,
+        overlay.compensation_disabled,
+        floors={"energy": lowest_target(body, formula)},
+    )
+    return TargetContext(
+        profile=profile,
+        body=body,
+        formula=formula,
+        references=references,
+        upper_limits=upper_limits,
+        overlay=overlay,
+        nutrients=nutrients,
+        policies=policies,
+        energy_offset_kcal=offset,
+        built=built,
+    )
+
+
+def base_targets_on(
+    db: Session, user: User, ctx: TargetContext, day: datetime.date
+) -> dict[str, float]:
+    """Each code's base target on `day`: its RDA, before anything is carried in.
+
+    The context date's figures, except where a different recalibration offset
+    was in force on `day`. Then the codes only the offset moves are rebuilt at
+    that day's offset, so a step taken today does not re-cost a finished day that
+    had a different (or no) offset in force. A code the condition overlay set
+    keeps the context date's figure: the offset is not the only thing that moved
+    it.
+    """
+    targets = ctx.overlay.targets
+    offset = weight.offset_on(db, user, day)
+    if offset == ctx.energy_offset_kcal:
+        return {code: target.rda for code, target in targets.items()}
+
+    own = _built_at(ctx.profile, ctx.body, ctx.references, ctx.upper_limits, offset)
+    return {
+        code: (
+            own[code].rda
+            if code in _ENERGY_DERIVED_CODES and target is ctx.built.get(code)
+            else target.rda
+        )
+        for code, target in targets.items()
+    }
+
+
+@dataclass(frozen=True)
+class LedgerDay:
+    """One source day of a walk: what it was asked for, was carried, ate, and let expire."""
+
+    date: datetime.date
+    # Something was logged, and the day had ended (it is before `as_of`). An
+    # untracked day hands nothing on and lets nothing expire.
+    tracked: bool
+    consumed: dict[str, float]  # {} when untracked
+    base: dict[str, float]  # base_targets_on(day)
+    # effective_target(policy, base, carried_in), for every code.
+    effective: dict[str, float]
+    carried_in: dict[str, float]
+    carried_from: dict[str, datetime.date]
+    # What could not be carried, >= 0. A code is present only when the day fell
+    # short of it (or went over it); 0.0 means nothing was lost.
+    expired_shortfall: dict[str, float]
+    expired_surplus: dict[str, float]
+
+
+@dataclass(frozen=True)
+class Ledger:
+    days: dict[datetime.date, LedgerDay]  # every day start..end inclusive
+    # Per landing day, what was carried onto it and from which day first. Only
+    # days something landed on appear, including those after `end`: the day
+    # after a walk reads its carries here.
+    carried: dict[datetime.date, dict[str, float]]
+    sources: dict[datetime.date, dict[str, datetime.date]]
+
+
+def walk_ledger(
+    db: Session,
+    user: User,
+    ctx: TargetContext,
+    start: datetime.date,
+    end: datetime.date,
+    as_of: datetime.date | None = None,
+) -> Ledger:
+    """Walk the source days `start`..`end`, handing each day's outcome forward.
+
+    Each day is costed at its own base targets plus whatever earlier days of the
+    walk carried onto it. Nothing is carried into `start`: the walk begins from a
+    clean slate, which `COMPENSATION_WINDOW_DAYS` makes exact for the day Today
+    asks about.
+
+    `as_of` is the caller's today. A day on or after it has not ended, so like a
+    day with nothing logged it is untracked: it carries nothing out and lets
+    nothing expire.
+    """
+    from app.diary import service as diary  # imported here to avoid a cycle
+
+    targets = ctx.overlay.targets
+    carried: dict[datetime.date, dict[str, float]] = defaultdict(lambda: defaultdict(float))
+    sources: dict[datetime.date, dict[str, datetime.date]] = defaultdict(dict)
+    days: dict[datetime.date, LedgerDay] = {}
+
+    day = start
+    while day <= end:
+        base = base_targets_on(db, user, ctx, day)
+        # Carries only ever land on later days, so by now everything bound for
+        # this one has arrived.
+        carried_in = dict(carried.get(day, {}))
+        effective = {
+            code: effective_target(ctx.policies[code], base[code], carried_in.get(code, 0.0))
+            for code in targets
+        }
+
+        # A day that has not ended yet is untracked for the same reason an empty
+        # one is: what it holds so far is a part of a day, and costing it against
+        # a whole day's target would carry a shortfall the user has all evening
+        # to eat away.
+        ended = as_of is None or day < as_of
+        # A day with nothing logged is untracked, not a day of eating nothing.
+        # Treating it as a total shortfall would flood every following day with
+        # carries the user never earned.
+        consumed = diary.consumed_on(db, user, day) if ended else {}
+
+        expired_shortfall: dict[str, float] = {}
+        expired_surplus: dict[str, float] = {}
+        for code in targets:
+            # The per-nutrient counterpart of the rule above. A code absent from
+            # the totals was measured by none of the day's foods, so a shortfall
+            # against it is a gap in the food tables rather than in the diet --
+            # and carrying it forward would invent a deficit the user never had.
+            if code not in consumed:
+                continue
+
+            plan = plan_carry(
+                ctx.policies[code],
+                consumed=consumed[code],
+                effective_target=effective[code],
+                base_target=base[code],
+            )
+            for carry in plan.carries:
+                landing = day + datetime.timedelta(days=carry.day_offset)
+                carried[landing][code] += carry.amount
+                sources[landing].setdefault(code, day)
+
+            delta = consumed[code] - effective[code]
+            if delta < 0:
+                expired_shortfall[code] = max(plan.expired, 0.0)
+            elif delta > 0:
+                expired_surplus[code] = max(plan.expired, 0.0)
+
+        days[day] = LedgerDay(
+            date=day,
+            tracked=bool(consumed),
+            consumed=consumed,
+            base=base,
+            effective=effective,
+            carried_in=carried_in,
+            carried_from=dict(sources.get(day, {})),
+            expired_shortfall=expired_shortfall,
+            expired_surplus=expired_surplus,
+        )
+        day += datetime.timedelta(days=1)
+
+    return Ledger(
+        days=days,
+        carried={landing: dict(amounts) for landing, amounts in carried.items()},
+        sources={landing: dict(codes) for landing, codes in sources.items()},
+    )
+
+
 def resolve_day(
     db: Session,
     user: User,
@@ -294,134 +541,31 @@ def resolve_day(
     """
     from app.diary import service as diary  # imported here to avoid a cycle
 
-    profile = profiles.get_profile(db, user)
-    if profile is None:
+    ctx = load_context(db, user, target_date)
+    if ctx is None:
         return None
 
-    body = profiles.body_of(profile)
-    formula = energy_target(body, goal=profile.goal, pace=profile.pace)
-    references = load_references(db, profile)
-    upper_limits = load_upper_limits(db)
-    target_offset = weight.offset_on(db, user, target_date)
-    base = build_targets(
-        body,
-        goal=profile.goal,
-        pace=profile.pace,
-        cereal_dominant=profile.cereal_dominant,
-        references=references,
-        upper_limits=upper_limits,
-        # The recalibration in force on this date, so a past day keeps the target
-        # it had and a step taken today does not re-cost yesterday.
-        energy_offset_kcal=target_offset,
+    # Everything that lands on `target_date` was handed on by the window before it.
+    ledger = walk_ledger(
+        db,
+        user,
+        ctx,
+        target_date - datetime.timedelta(days=COMPENSATION_WINDOW_DAYS),
+        target_date - datetime.timedelta(days=1),
+        as_of,
     )
-
-    overlay = apply_conditions(
-        base,
-        conditions=profiles.get_conditions(db, user),
-        medications=[
-            (item.name, item.taken_at.strftime("%H:%M"))
-            for item in profiles.get_medications(db, user)
-        ],
-    )
-    targets = overlay.targets
-    nutrients = load_nutrients(db)
-    # The ledger may lower energy after a surplus, but never through the floor a
-    # recalibration respects. Carries from two surplus days add up, which without
-    # this could take the day to 40% of its target -- far under BMR -- and the
-    # planner sizes portions from that figure.
-    policies = _policies(
-        targets,
-        nutrients,
-        overlay.compensation_disabled,
-        floors={"energy": lowest_target(body, formula)},
-    )
-
-    # Window days whose offset differs from target_date's need their own
-    # energy-derived targets -- memoised by offset, since at most a couple of
-    # distinct values occur inside a four-day window.
-    offset_targets: dict[float, dict[str, Target]] = {target_offset: base}
-
-    def _targets_for_offset(offset: float) -> dict[str, Target]:
-        if offset not in offset_targets:
-            offset_targets[offset] = build_targets(
-                body,
-                goal=profile.goal,
-                pace=profile.pace,
-                cereal_dominant=profile.cereal_dominant,
-                references=references,
-                upper_limits=upper_limits,
-                energy_offset_kcal=offset,
-            )
-        return offset_targets[offset]
-
-    # Walk the window forward, accumulating what each day hands to the next.
-    carried: dict[datetime.date, dict[str, float]] = defaultdict(lambda: defaultdict(float))
-    sources: dict[datetime.date, dict[str, datetime.date]] = defaultdict(dict)
-
-    start = target_date - datetime.timedelta(days=COMPENSATION_WINDOW_DAYS)
-    day = start
-    while day < target_date:
-        # A day that has not ended yet is untracked for the same reason an empty
-        # one is: what it holds so far is a part of a day, and costing it against
-        # a whole day's target would carry a shortfall the user has all evening
-        # to eat away.
-        if as_of is not None and day >= as_of:
-            day += datetime.timedelta(days=1)
-            continue
-
-        consumed = diary.consumed_on(db, user, day)
-
-        # A day with nothing logged is untracked, not a day of eating nothing.
-        # Treating it as a total shortfall would flood every following day with
-        # carries the user never earned.
-        if consumed:
-            # The offset in force on THIS day, not target_date's. A step taken
-            # today must not re-cost a finished day that had a different (or no)
-            # offset in force -- see `_ENERGY_DERIVED_CODES` above.
-            day_offset = weight.offset_on(db, user, day)
-            day_base = base if day_offset == target_offset else _targets_for_offset(day_offset)
-
-            for code, target in targets.items():
-                # The per-nutrient counterpart of the rule above. A code absent
-                # from the totals was measured by none of the day's foods, so a
-                # shortfall against it is a gap in the food tables rather than in
-                # the diet -- and carrying it forward would invent a deficit the
-                # user never had.
-                if code not in consumed:
-                    continue
-
-                day_rda = target.rda
-                if (
-                    day_offset != target_offset
-                    and code in _ENERGY_DERIVED_CODES
-                    and target is base.get(code)
-                ):
-                    # Untouched by the condition overlay, so the offset is the
-                    # only thing that moved it -- cost it at this day's figure.
-                    day_rda = day_base[code].rda
-
-                policy = policies[code]
-                today_target = effective_target(policy, day_rda, carried[day][code])
-                plan = plan_carry(
-                    policy,
-                    consumed=consumed.get(code, 0.0),
-                    effective_target=today_target,
-                    base_target=day_rda,
-                )
-                for carry in plan.carries:
-                    landing = day + datetime.timedelta(days=carry.day_offset)
-                    carried[landing][code] += carry.amount
-                    sources[landing].setdefault(code, day)
-        day += datetime.timedelta(days=1)
+    carried = ledger.carried.get(target_date, {})
+    sources = ledger.sources.get(target_date, {})
 
     consumed_today = diary.consumed_on(db, user, target_date)
     coverage_today = diary.coverage_on(db, user, target_date)
+    targets = ctx.overlay.targets
 
     rows = []
     for code, target in sorted(targets.items()):
-        nutrient = nutrients.get(code)
-        carried_in = carried[target_date].get(code, 0.0)
-        source_day = sources[target_date].get(code)
+        nutrient = ctx.nutrients.get(code)
+        carried_in = carried.get(code, 0.0)
+        source_day = sources.get(code)
 
         rows.append(
             NutrientDay(
@@ -433,7 +577,7 @@ def resolve_day(
                 ear=target.ear,
                 rda=target.rda,
                 tul=target.tul,
-                target_effective=effective_target(policies[code], target.rda, carried_in),
+                target_effective=effective_target(ctx.policies[code], target.rda, carried_in),
                 carried_in=carried_in,
                 carried_from=source_day.strftime("%A") if source_day else None,
                 consumed=consumed_today.get(code, 0.0),
@@ -445,10 +589,10 @@ def resolve_day(
         date=target_date,
         nutrients=rows,
         warnings=[
-            *overlay.warnings,
-            *_recalibration_warnings(targets["energy"].rda - formula),
-            *_framework_warnings(references),
-            *_iron_limit_warnings(references, targets, consumed_today),
+            *ctx.overlay.warnings,
+            *_recalibration_warnings(targets["energy"].rda - ctx.formula),
+            *_framework_warnings(ctx.references),
+            *_iron_limit_warnings(ctx.references, targets, consumed_today),
         ],
-        hold_steady=overlay.compensation_disabled,
+        hold_steady=ctx.overlay.compensation_disabled,
     )
