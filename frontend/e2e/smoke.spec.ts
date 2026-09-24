@@ -19,6 +19,10 @@ import { expect, test } from '@playwright/test'
  *  - The Plan screen on the real planner, rather than the fixture it shipped with,
  *    and -- when the database carries the full ETL -- a swap and a lock against the
  *    real dish pool, which is the path `load_pool` runs on every edit.
+ *  - Weight on the real trend: onboarding's weight is the first weigh-in, and a
+ *    weigh-in the same day replaces it.
+ *  - Cycle tracking gated on the profile, and a heavy-bleeding answer producing a
+ *    referral rather than a changed target.
  */
 
 const SEARCH_DEBOUNCE_MS = 400
@@ -156,7 +160,15 @@ test.describe('the tracking loop', () => {
     // The demo banner is gone for good.
     await expect(page.getByRole('note')).toHaveCount(0)
 
+    // Wait for the regenerate's own refetch, not just the click: against the full
+    // ETL this POST can still be running server-side after the test moves on, and
+    // the next test's swap can then race it and hit a stale item id.
+    const refetched = page.waitForResponse(
+      (response) =>
+        response.request().method() === 'GET' && response.url().includes('/plan/week?'),
+    )
     await page.getByRole('button', { name: /regenerate week/i }).click()
+    await refetched
     await expect(page.getByRole('region', { name: 'Sunday' })).toBeVisible()
     await expect(page.getByRole('alert')).toHaveCount(0)
   })
@@ -213,5 +225,60 @@ test.describe('the tracking loop', () => {
     await row.getByRole('button', { name: 'Unlock' }).click()
     await expect(row.getByText('Locked', { exact: true })).toBeHidden()
     await expect(row.getByRole('button', { name: 'Swap' })).toBeEnabled()
+  })
+
+  test('a weigh-in lands in the list and becomes the profile weight', async ({ page }) => {
+    await page.goto('/weight')
+    await expect(page.getByRole('heading', { name: 'Where you are' })).toBeVisible()
+    await expect(page.getByRole('note')).toHaveCount(0)
+
+    // Onboarding recorded the first weigh-in, from the profile's 65 kg.
+    await expect(page.getByRole('cell', { name: '65 kg' })).toBeVisible()
+
+    await page.getByLabel(/weight in kg/i).fill('64.5')
+    await page.getByRole('button', { name: 'Save', exact: true }).click()
+
+    // Same day, so it replaces the onboarding weigh-in rather than joining it.
+    await expect(page.getByRole('cell', { name: '64.5 kg' })).toBeVisible()
+    await expect(page.getByRole('cell', { name: '65 kg' })).toHaveCount(0)
+
+    await page.goto('/profile')
+    await expect(page.getByText('64.5 kg')).toBeVisible()
+  })
+
+  test('cycle tracking is offered to a woman who menstruates, and heavy bleeding refers', async ({
+    page,
+  }) => {
+    await page.goto('/cycle')
+    // The walk onboarded a man.
+    await expect(page.getByText(/cycle tracking is for profiles set to female/i)).toBeVisible()
+
+    // Switch the profile through the real API: the wizard itself is walked above.
+    const api = 'http://localhost:8000'
+    const profile = await (await page.request.get(`${api}/profile`)).json()
+    const saved = await page.request.put(`${api}/profile`, {
+      data: { ...profile, sex: 'female', weight_kg: 55, menstrual_status: 'menstruating' },
+    })
+    expect(saved.ok()).toBe(true)
+
+    await page.reload()
+    const toggle = page.getByRole('switch', { name: /track my cycle/i })
+    await expect(toggle).not.toBeChecked()
+    // The switch shows the server's state and turns on only once the PATCH and the
+    // refetch land, so check()'s one-time state read would throw. Click, then wait.
+    await toggle.click()
+    await expect(toggle).toBeChecked()
+    await expect(page.getByText(/iron target does not change/i)).toBeVisible()
+    await expect(page.getByRole('note')).toHaveCount(0)
+
+    // Exact: the flooding question's label also contains "bleeding".
+    await page.getByLabel('Bleeding', { exact: true }).selectOption('heavy')
+    await page.getByRole('checkbox', { name: 'Cramps' }).check()
+    await page.getByRole('button', { name: 'Save day' }).click()
+    await expect(page.getByText(/heavy flow, cramps/i)).toBeVisible()
+
+    await page.getByRole('checkbox', { name: /soak through a pad/i }).check()
+    await page.getByRole('button', { name: 'Save answers' }).click()
+    await expect(page.getByRole('alert')).toContainText(/please see a clinician/i)
   })
 })

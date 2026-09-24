@@ -57,6 +57,11 @@ export default defineConfig({
     trace: 'on-first-retry',
     screenshot: 'only-on-failure',
     launchOptions: { args: ['--no-proxy-server'] },
+    // The browser's date must be the e2e user's. The weight walk compares a weigh-in
+    // the browser dates (`todayIso()`) with the one onboarding recorded, which the
+    // server dates in the user's zone -- Asia/Kolkata, set in
+    // backend/scripts/e2e_session.py. On a UTC CI runner they differ from 18:30 UTC.
+    timezoneId: 'Asia/Kolkata',
   },
   projects: [{ name: 'chromium', use: { ...devices['Desktop Chrome'] } }],
   webServer: {

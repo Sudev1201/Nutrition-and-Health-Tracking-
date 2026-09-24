@@ -12,7 +12,7 @@ npm install
 npm run dev
 ```
 
-Auth, households and food search talk to the real FastAPI backend on
+Every screen but Report and Reminders talks to the real FastAPI backend on
 `VITE_API_BASE` (default `http://localhost:8000`), which needs Postgres running:
 
 ```bash
@@ -22,8 +22,8 @@ cd backend && uv run alembic upgrade head && uv run uvicorn app.main:app --reloa
 
 ### Without a backend
 
-Most screens are not wired to a backend yet (see below), and the ones that are need Postgres and
-a Google OAuth client. To walk the whole app without either:
+Report and Reminders are not wired to a backend yet (see below), and the ones that are need
+Postgres and a Google OAuth client. To walk the whole app without either:
 
 ```bash
 VITE_DEMO_AUTH=true npm run dev
@@ -35,13 +35,14 @@ it hands a session to anyone who asks.
 ## Which screens are real
 
 **Live against the real backend:** sign-in, household, food search, the onboarding
-questionnaire, Today (real ICMR-NIN targets and the compensation ledger), meal logging, and
-the meal plan (generation, swap, lock, regenerate, and the household cooking view).
+questionnaire and profile, Today (real ICMR-NIN targets and the compensation ledger),
+meal logging, the meal plan (generation, swap, lock, regenerate, and the household
+cooking view), weight (weigh-ins, the trend and calorie recalibration) and cycle
+tracking.
 
-**Still on MSW fixtures:** Report, Weight, Cycle and Reminders. Each carries a
-**Demo data** banner naming the endpoint it is waiting for. Those handlers and the
-`types.ts` in each feature folder are the proposed contract for the remaining
-backend plans.
+**Still on MSW fixtures:** Report and Reminders. Each carries a **Demo data** banner
+naming the endpoint it is waiting for. Those handlers and the `types.ts` in each
+feature folder are the proposed contract for the remaining backend plans.
 
 Mocks are on in dev and off in a production build. Override with `VITE_USE_MOCKS=false` (dev
 against a fully real backend) or `true` (a self-contained demo build). MSW is dynamically
@@ -82,7 +83,7 @@ project references and will miss errors.
 ### End to end
 
 ```bash
-npm run test:e2e   # Playwright: onboarding -> log -> dashboard, then the plan
+npm run test:e2e   # Playwright: onboarding -> log -> dashboard, then the plan, weight and cycle
 ```
 
 Deliberately against the **real** backend and a real Postgres, never against MSW — run against

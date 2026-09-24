@@ -101,8 +101,8 @@ Defined by the handlers in `frontend/src/mocks/handlers/` and typed in each feat
 | `GET /diary?date=`, `POST/DELETE /diary/entries` | `src/log/types.ts` | Plan 5 |
 | `GET /plan/week?start=`, swap / lock / regenerate, `GET /plan/cooking` | `src/plan/types.ts` | Plan 6 |
 | `GET /reports/week?start=` | `src/report/types.ts` | Plan 8 |
-| `GET/POST /weight` | `src/weight/types.ts` | Plan 7 |
-| `GET /cycle`, `PATCH /cycle` | `src/cycle/types.ts` | Plan 7 |
+| `GET/POST /weight`, `DELETE /weight/{date}` | `src/weight/types.ts` | Plan 7 (built; contract amended) |
+| `GET/PATCH/DELETE /cycle`, `PUT/DELETE /cycle/days/{date}`, `POST /cycle/screening` | `src/cycle/types.ts` | Plan 7 (built; contract amended) |
 | `GET/PATCH /settings/reminders` | `src/settings/types.ts` | Plans 4, 8 |
 
 Two shape notes worth carrying into the backend plans:

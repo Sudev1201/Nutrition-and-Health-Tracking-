@@ -26,6 +26,9 @@
 
 The HTTP contracts are `frontend/src/weight/types.ts` and `frontend/src/cycle/types.ts`, with fixtures in `frontend/src/mocks/fixtures/more.ts`.
 
+**Status:** Complete. 615 backend tests and 229 frontend tests passing, plus 7 Playwright
+end-to-end tests; `ruff`, `alembic check`, `tsc -b`, `oxlint` and `vite build` clean.
+
 ## Global Constraints
 
 **Backend tooling**

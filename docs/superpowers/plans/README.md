@@ -14,7 +14,7 @@ begins.
 | 4 | Onboarding & daily targets | Profile questionnaire, meal times, observance rules, usual-intake wizard, first computed targets | **Complete** — `2026-08-17-tracking-loop.md`. Includes the usual-intake wizard and the computed baseline |
 | 5 | Logging & daily dashboard | Per-slot meal logging, editable dish ingredients, restaurant/estimated entries, today's view | **Complete except one dropped item** — `2026-08-17-tracking-loop.md`, closed out by `2026-08-20-plan-5-closeout.md`. Logging in household measures, estimated entries, the daily view, per-day meal skipping and a configurable meal count are live. Editable dish ingredients was dropped from scope |
 | 6 | Meal planner | 7-day generation, swap/lock/regenerate, intra-day re-plan, household cooking view | **Complete** — `2026-09-02-meal-planner.md`. Generated on demand rather than on a Saturday schedule; one dish per slot (the paired snack beverage needs a beverage tag the seed data lacks) |
-| 7 | Weight & cycle | Weigh-ins, trend smoothing, calorie recalibration, cycle logging and coaching | Not started |
+| 7 | Weight & cycle | Weigh-ins, trend smoothing, calorie recalibration, cycle logging and coaching | **Complete** — `2026-09-24-weight-and-cycle.md`. Recalibration is evaluated when a weigh-in is posted rather than on a schedule; postmenopausal status and the IOM iron fallback live on the profile |
 | 8 | Weekly report & reminders | Nutrient report, uncompensated gaps, next-week suggestions, web push at meal times | Not started |
 | 9 | LLM polish & deploy | BYO-key polish adapter, hosting, domain, seed migration | Not started |
 
@@ -35,6 +35,9 @@ five interactions must be re-verified against a drug reference before being enco
 
 Plan 6's decisions and the gaps it leaves are recorded at the top and bottom of
 `2026-09-02-meal-planner.md`.
+
+Plan 7's decisions and the gaps it leaves are recorded at the top and bottom of
+`2026-09-24-weight-and-cycle.md`.
 
 Each plan is written only when its predecessor is complete, so it can account for what actually
 got built rather than what was predicted.
