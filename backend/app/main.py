@@ -3,6 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.auth.router import router as auth_router
 from app.config import settings
+from app.cycle.router import router as cycle_router
 from app.diary.router import router as diary_router
 from app.foods.router import router as foods_router
 from app.households.router import router as households_router
@@ -29,6 +30,7 @@ app.include_router(targets_router)
 app.include_router(diary_router)
 app.include_router(planner_router)
 app.include_router(weight_router)
+app.include_router(cycle_router)
 
 
 @app.get("/health")
