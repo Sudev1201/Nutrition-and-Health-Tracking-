@@ -26,8 +26,9 @@
 
 The HTTP contracts are `frontend/src/weight/types.ts` and `frontend/src/cycle/types.ts`, with fixtures in `frontend/src/mocks/fixtures/more.ts`.
 
-**Status:** Complete. 615 backend tests and 229 frontend tests passing, plus 7 Playwright
-end-to-end tests; `ruff`, `alembic check`, `tsc -b`, `oxlint` and `vite build` clean.
+**Status:** Complete, with the final-review fix wave applied. 631 backend tests and 245 frontend
+tests passing, plus 7 Playwright end-to-end tests (last run before the fix wave, which changed no
+walked selector); `ruff`, `alembic check`, `tsc -b`, `oxlint` and `vite build` clean.
 
 ## Global Constraints
 
@@ -105,9 +106,12 @@ Recorded here so the implementer does not re-litigate them; the closeout carries
   - Smoothed weight is the mean of the last three weigh-ins.
   - Observed rate is the least-squares slope over the weigh-ins in the last 28 days that are also on or after the last step. It needs at least three weigh-ins spanning at least 14 days.
   - Expected rate comes from the formula target's real deficit, `(target − TEE) × 7 / 7700`, not from the pace's nominal figure. The BMR clamp shrinks the deficit for small sedentary users. A 55 kg sedentary woman on a steady loss sits on her BMR and should expect about 0.32 kg/week, not 0.5. Holding her to 0.5 would read an on-track trend as a stall.
-  - Spec manual step 8 says "two weigh-ins". This plan needs three, because two weigh-ins give only one interval, and the spec's own "smoothed over the last 2–3 weigh-ins" and "sustained drift" rule that out.
+  - Spec manual step 8 says "two weigh-ins". A reading needs three, because two weigh-ins give only one interval, and the spec's own "smoothed over the last 2–3 weigh-ins" and "sustained drift" rule that out.
+  - A step needs the trend confirmed by two consecutive readings: the reading as of the new weigh-in, and the reading as of the weigh-in before it (the same window rules, back to the same last step). Both must drift past the tolerance in the same direction. With three weekly points the least-squares slope is (last − first) / 2, so the middle point carries no weight, and one water-heavy morning as the newest weigh-in would otherwise decide a step on its own and a counter-step soon after. The spec asks for smoothing "so water-weight noise doesn't cause thrash". A single blip is always either the newest point of the first reading or a diluted point of the next, so it can never step.
+  - Weighing weekly, a step therefore needs four weigh-ins across three weeks, counting the one on the date of the last step or the onboarding weigh-in. Spec manual step 8 now needs four weigh-ins, not two (added in the final-review fix wave).
 - **How a step is sized.**
-  - Drift under 0.25 kg/week is left alone.
+  - Drift under 0.25 kg/week is left alone, and drift that the previous reading does not confirm is left alone too.
+  - The step is sized from the newest reading's drift, and from the offset in force today (the stored offset re-clamped to today's bound and floor), not the stored figure.
   - Beyond that, the offset moves by half the energy-balance figure (1 kg/week ≈ 1,100 kcal/day). A slope fitted to three or four points is noisy, and correcting it in full overshoots.
   - The total offset stays within ±10% of the formula and does not compound past that bound.
   - The offset is truncated toward zero, to whole tens of kcal.
@@ -6585,10 +6589,15 @@ Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>"
 ## Known gaps to record in the closeout
 
 - **Recalibration runs only when a weigh-in is posted.** A user who stops weighing in keeps the last step indefinitely. A scheduled re-read belongs with plan 8's job runner.
-- **The ledger re-costs the window against the target date's targets.** `resolve_day` builds one set of targets and uses it for the four days before the target date. On the first days after a step, the earlier days' carries are therefore costed against the new target. This was already the case for every profile change.
+- **Window days are re-costed with the current weight's body and formula.** Each of the four days before the target date is costed at its own offset (fixed in 6cdd071), but with the current weight's body and formula. The days just after a weigh-in or a goal change are therefore re-costed by the formula difference, about 20 kcal a kilogram. This was already the case for every profile change.
+- **A step now needs a trend confirmed by two consecutive readings.** Weighing weekly, that is four weigh-ins across three weeks, so a real drift is acted on a week later than a single reading would allow. Spec manual step 8's "two weigh-ins" now reads four.
 - **Pregnancy and lactation are not modelled.** There is no reference row for them, and the iron upper limit's pregnancy exception is not applied.
 - **Adolescents get the adult reference rows.** The heavy-bleeding referral's 1-in-5 figure is specifically about adolescents, which is why the referral does not depend on age. The targets for under-18s are still the adult ones.
 - **Weight and cycle are private because nothing exposes them, not because a permission is checked.** `share_health` is still read by nothing. The first endpoint that shows one member's health data to another must read it.
+- **The first endpoint that honours `share_health` must share cycle data only under a label that names it.** The Household screen's switch now reads "Share my health details (conditions, weight, cycle)".
+- **A woman aged 60 or over who answers "Yes, I have periods" is on the IOM iron row by age band.** She gets the 8 mg target and the "after menopause" reference note, although she has said she still menstruates.
+- **A swap or lock sent while a regenerate is running used to answer 500** (`StaleDataError`, a plan 6 defect). The Plan screen now disables Swap and Lock during a regenerate, and the backend race remains for any other client.
+- **Concurrent upserts can answer 500.** Weigh-ins, calorie adjustments and cycle settings check for a row and then insert, so a double submit can hit the unique constraint with an unhandled `IntegrityError`.
 - **60+ targets are still thin, for men and women alike.** The 60+ band carries four nutrients (protein, calcium, iron and vitamin D), and protein is computed anyway. This plan added the missing iron note, but not the fourteen nutrients the band lacks, which need a decision on falling back to the 18–59 figures.
 - **A step does not re-size this week's stored plan.** Regenerating would throw away the user's swaps, so the Plan screen's Regenerate is left to do it. A hint on the Plan screen when the target has moved since the week was planned would close the gap.
 - **No approaching-limit warning for anyone but postmenopausal women.** The planner still penalises only going over a TUL.
