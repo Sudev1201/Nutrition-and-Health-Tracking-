@@ -3,8 +3,11 @@ import contextlib
 import logging
 from collections.abc import AsyncIterator
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request, status
+from fastapi.exception_handlers import request_validation_exception_handler
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 
 from app.auth.router import router as auth_router
 from app.config import settings
@@ -12,6 +15,9 @@ from app.cycle.router import router as cycle_router
 from app.diary.router import router as diary_router
 from app.foods.router import router as foods_router
 from app.households.router import router as households_router
+from app.llm import crypto
+from app.llm.router import NO_STORE, NOT_UNDERSTOOD
+from app.llm.router import router as llm_router
 from app.planner.router import router as planner_router
 from app.profiles.router import router as profile_router
 from app.reminders.router import push_router, settings_router
@@ -32,6 +38,11 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     test's. The loop signs pushes with the VAPID private key, so without one it
     would only record every reminder as failed.
     """
+    # Parse the LLM keyring now, so a malformed LLM_KEY_ENCRYPTION_KEYS stops the app at
+    # boot instead of failing the first user who saves a key. An empty one only turns AI
+    # descriptions off.
+    crypto.keyring()
+
     task = None
     if settings.scheduler_enabled and settings.vapid_private_key:
         task = asyncio.create_task(run_forever())
@@ -68,6 +79,25 @@ app.include_router(cycle_router)
 app.include_router(reports_router)
 app.include_router(settings_router)
 app.include_router(push_router)
+app.include_router(llm_router)
+
+
+@app.exception_handler(RequestValidationError)
+async def validation_error(request: Request, exc: RequestValidationError) -> JSONResponse:
+    """FastAPI's own 422, except on /settings/llm, where it would quote the key.
+
+    A body that fails validation before the route runs -- `api_key` misspelt, missing or
+    not a string, or a body that is not JSON -- comes back in FastAPI's 422 with the input
+    that failed, and on /settings/llm that input is the key. There the answer is one fixed
+    sentence instead, uncached like the answers of the handlers there.
+    """
+    if request.url.path.startswith("/settings/llm"):
+        return JSONResponse(
+            {"detail": NOT_UNDERSTOOD},
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            headers={"Cache-Control": NO_STORE},
+        )
+    return await request_validation_exception_handler(request, exc)
 
 
 @app.get("/health")

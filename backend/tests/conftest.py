@@ -1,16 +1,20 @@
+import contextlib
+from collections.abc import Callable, Iterator, Sequence
 from pathlib import Path
 
 import httpx2
 import pytest
 from alembic.config import Config
 from alembic.script import ScriptDirectory
+from cryptography.fernet import Fernet
 from fastapi.testclient import TestClient
-from sqlalchemy import Engine, create_engine, inspect, text
+from sqlalchemy import Engine, create_engine, event, inspect, text
 from sqlalchemy.orm import Session
 
 from app.auth import google as google_auth
 from app.config import settings
 from app.llm import providers
+from app.llm.providers import DishBrief, DishText, ProviderError, get_provider
 from app.main import app
 from app.models.food import Dish, DishIngredient, Ingredient, IngredientNutrient
 from app.models.nutrient import Nutrient
@@ -329,3 +333,82 @@ def signed_in(api_client, monkeypatch) -> TestClient:
     return api_client
 
 
+@contextlib.contextmanager
+def sql_statements(db: Session) -> Iterator[list[str]]:
+    """Every SQL statement run on the test transaction's connection, with its parameters.
+
+    Each entry is the statement followed by the repr of its bound parameters. Requests
+    share that connection through the `get_db` override, so this sees their SQL too.
+    """
+    sent: list[str] = []
+
+    def record(conn, cursor, statement, parameters, context, executemany) -> None:
+        sent.append(f"{statement} {parameters!r}")
+
+    connection = db.connection()
+    event.listen(connection, "before_cursor_execute", record)
+    try:
+        yield sent
+    finally:
+        event.remove(connection, "before_cursor_execute", record)
+
+
+class FakeProvider:
+    """Stands in for Anthropic: records every call, returns `texts`, raises `error` when set.
+
+    Both methods record the call before raising, so a test can check what was sent even
+    when the call failed.
+    """
+
+    def __init__(self) -> None:
+        self.checked: list[tuple[str, str]] = []  # (api_key, model)
+        self.polished: list[tuple[str, str, tuple[DishBrief, ...]]] = []
+        self.texts: dict[str, DishText] | None = None  # None: a default text per ref
+        self.error: ProviderError | None = None
+
+    def check_key(self, api_key: str, model: str) -> None:
+        self.checked.append((api_key, model))
+        if self.error is not None:
+            raise self.error
+
+    def polish(self, api_key: str, model: str, dishes: Sequence[DishBrief]) -> dict[str, DishText]:
+        self.polished.append((api_key, model, tuple(dishes)))
+        if self.error is not None:
+            raise self.error
+        if self.texts is not None:
+            return dict(self.texts)
+        # No digits and no number or nutrient words, so the planner's guard keeps it.
+        return {brief.ref: DishText(f"A home-style {brief.name}.", None) for brief in dishes}
+
+
+@pytest.fixture
+def set_keyring(monkeypatch) -> Iterator[Callable[..., None]]:
+    """Set the server's keyring to these keys, newest first, for this test only.
+
+    `set_keyring()` with no keys switches AI descriptions off. Set explicitly, as the
+    VAPID keys are: a developer's .env may carry a real keyring, and nothing in the suite
+    may encrypt under it. No cache needs clearing: crypto caches the parsed keyring by
+    the setting's value, so a new value is parsed afresh.
+    """
+
+    def use(*keys: str) -> None:
+        monkeypatch.setattr(settings, "llm_key_encryption_keys", ",".join(keys))
+
+    yield use
+
+
+@pytest.fixture
+def llm_keyring(set_keyring) -> str:
+    """AI descriptions switched on, under a fresh one-key keyring. Returns that key."""
+    key = Fernet.generate_key().decode()
+    set_keyring(key)
+    return key
+
+
+@pytest.fixture
+def fake_provider(api_client) -> Iterator[FakeProvider]:
+    """The provider every request gets instead of Anthropic's."""
+    fake = FakeProvider()
+    app.dependency_overrides[get_provider] = lambda: fake
+    yield fake
+    app.dependency_overrides.pop(get_provider, None)
