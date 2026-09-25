@@ -6,6 +6,9 @@ __pycache__/
 .pytest_cache/
 .ruff_cache/
 backend/etl/.cache/
+# The seed snapshot (backend/scripts/seed_snapshot.py). It is derived from IFCT, which
+# has no open licence, so it never goes into git or a public release.
+backend/seed-snapshot/
 node_modules/
 dist/
 .DS_Store

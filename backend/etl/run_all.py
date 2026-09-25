@@ -22,6 +22,7 @@ run's data untouched rather than a half-loaded database.
 One run at a time: see ETL_LOCK_KEY.
 """
 
+import shutil
 import zipfile
 from pathlib import Path
 
@@ -70,16 +71,30 @@ def _usda_csv_paths() -> tuple[Path, Path, Path]:
     """Download (if needed) and extract (if needed) the USDA Foundation Foods
     release, returning the three CSVs load_usda_gapfill reads.
 
-    Extraction is skipped once the target directory exists, so a second run
-    doesn't re-unzip a ~50 MB archive it already expanded.
+    Extraction is skipped once the release directory exists, so a second run
+    doesn't re-unzip a ~50 MB archive it already expanded. That makes the
+    directory's existence the proof that extraction finished, so the archive is
+    extracted into a `.part` directory beside it, and the release directory is
+    renamed into place only once every file is out. An extraction cut off
+    halfway (a full disk, a damaged archive) leaves nothing for a later run to
+    load: an empty or cut-off food_nutrient.csv would otherwise load without
+    error, just with fewer B12 and iodine values. A `.part` directory left by a
+    killed process is deleted, never read.
     """
     zip_path = cached_download(USDA_URL, "usda_foundation_food.zip")
     extract_root = zip_path.parent / "usda_foundation_food"
     csv_dir = extract_root / USDA_CSV_DIRNAME
 
     if not csv_dir.exists():
-        with zipfile.ZipFile(zip_path) as archive:
-            archive.extractall(extract_root)
+        staging = extract_root.with_name(f"{extract_root.name}.part")
+        shutil.rmtree(staging, ignore_errors=True)
+        try:
+            with zipfile.ZipFile(zip_path) as archive:
+                archive.extractall(staging)
+            extract_root.mkdir(exist_ok=True)
+            (staging / USDA_CSV_DIRNAME).rename(csv_dir)
+        finally:
+            shutil.rmtree(staging, ignore_errors=True)
 
     return csv_dir / "food.csv", csv_dir / "nutrient.csv", csv_dir / "food_nutrient.csv"
 

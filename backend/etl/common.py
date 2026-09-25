@@ -78,15 +78,27 @@ def require_column_map(
 
 
 def cached_download(url: str, filename: str) -> Path:
-    """Download once into etl/.cache and reuse it on later runs."""
+    """Download once into etl/.cache and reuse it on later runs.
+
+    Any file at the final path is trusted as complete, so the download is written
+    to a `.part` file beside it and renamed into place only once the last byte
+    has arrived. An interrupted download leaves no file for a later run to load:
+    a truncated IFCT CSV would otherwise load without error, just with fewer
+    foods. A `.part` file left by a killed process is overwritten, never read.
+    """
     CACHE_DIR.mkdir(parents=True, exist_ok=True)
     target = CACHE_DIR / filename
 
     if not target.exists():
-        with httpx.stream("GET", url, follow_redirects=True, timeout=120) as response:
-            response.raise_for_status()
-            with target.open("wb") as handle:
-                for chunk in response.iter_bytes():
-                    handle.write(chunk)
+        partial = target.with_name(f"{target.name}.part")
+        try:
+            with httpx.stream("GET", url, follow_redirects=True, timeout=120) as response:
+                response.raise_for_status()
+                with partial.open("wb") as handle:
+                    for chunk in response.iter_bytes():
+                        handle.write(chunk)
+            partial.replace(target)
+        finally:
+            partial.unlink(missing_ok=True)
 
     return target
