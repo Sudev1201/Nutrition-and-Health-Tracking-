@@ -311,6 +311,30 @@ test('a key pasted but not sent is gone when the form comes back by itself', asy
   expect(screen.getByLabelText('Anthropic API key')).toHaveValue('')
 })
 
+// The mutation must survive the swap from the saved view to the form: a shared
+// component that owned it would be torn down on "Replace key" and rebuilt with
+// no listener for the DELETE already in flight, dropping onSuccess.
+test('replacing a key, then removing it, ends at the form with no going back', async () => {
+  let current: LlmSettings = savedWith('claude-sonnet-5')
+  let deletes = 0
+  server.use(
+    http.get(apiUrl('/settings/llm'), () => HttpResponse.json(current)),
+    http.delete(apiUrl('/settings/llm'), () => {
+      deletes += 1
+      current = NO_KEY
+      return new HttpResponse(null, { status: 204 })
+    }),
+  )
+  renderScreen()
+
+  await userEvent.click(await screen.findByRole('button', { name: 'Replace key' }))
+  await userEvent.click(screen.getByRole('button', { name: 'Remove key' }))
+
+  await waitFor(() => expect(screen.getByLabelText('Anthropic API key')).toHaveValue(''))
+  expect(deletes).toBe(1)
+  expect(screen.queryByRole('button', { name: 'Cancel' })).not.toBeInTheDocument()
+})
+
 test('removing the key sends a DELETE and goes back to the form', async () => {
   let current = savedWith('claude-opus-5')
   let deletes = 0

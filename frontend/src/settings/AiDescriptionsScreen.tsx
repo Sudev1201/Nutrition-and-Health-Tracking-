@@ -65,42 +65,41 @@ function SavedKey({ settings }: { settings: LlmSettings }) {
   )
 }
 
+/** What `useDeleteLlmKey()` returns — passed in, never created, by the two pieces below. */
+type DeleteLlmKey = ReturnType<typeof useDeleteLlmKey>
+
 /**
- * The "Remove key" button and its own failure message. Used both where a key can
- * still be checked (`KeyCard`) and where nothing on the server can check one any
- * more (`StoredKeyCard`) — removing a key needs no keyring, so it is offered
- * either way.
+ * Just the "Remove key" button, reading the pending state of a mutation its
+ * caller owns. No component here calls `useDeleteLlmKey()` itself: `KeyCard` and
+ * `StoredKeyCard` swap which view is mounted (the saved view, the form, or the
+ * no-keyring note) while staying mounted themselves, so the mutation has to live
+ * in them — a shared component that called the hook would be torn down and
+ * rebuilt on every such swap, taking any in-flight request's `onSuccess` with it.
  */
-function RemoveKey({
+function RemoveKeyButton({
+  remove,
   disabled = false,
   onClick,
-  onRemoved,
 }: {
+  remove: DeleteLlmKey
   /** Held off while another request that touches this key is in flight. */
   disabled?: boolean
-  /** Runs synchronously on click, before the request goes out. */
-  onClick?: () => void
-  /** Runs once the key is gone. */
-  onRemoved?: () => void
+  onClick: () => void
 }) {
-  const remove = useDeleteLlmKey()
-
-  function handleClick() {
-    onClick?.()
-    remove.mutate(undefined, onRemoved === undefined ? undefined : { onSuccess: onRemoved })
-  }
-
   return (
-    <>
-      <Button variant="danger" disabled={remove.isPending || disabled} onClick={handleClick}>
-        Remove key
-      </Button>
-      {remove.isError && (
-        <p role="alert" className="mt-2 text-sm text-above-limit">
-          {REMOVE_FAILED}
-        </p>
-      )}
-    </>
+    <Button variant="danger" disabled={remove.isPending || disabled} onClick={onClick}>
+      Remove key
+    </Button>
+  )
+}
+
+/** The same mutation's failure message, wherever "Remove key" is offered. */
+function RemoveKeyFailed({ remove }: { remove: DeleteLlmKey }) {
+  if (!remove.isError) return null
+  return (
+    <p role="alert" className="mt-2 text-sm text-above-limit">
+      {REMOVE_FAILED}
+    </p>
   )
 }
 
@@ -110,20 +109,24 @@ function RemoveKey({
  * keyring, so the user can always take theirs back.
  */
 function StoredKeyCard({ settings }: { settings: LlmSettings }) {
+  const remove = useDeleteLlmKey()
+
   return (
     <Card>
       <CardTitle>Your Anthropic API key</CardTitle>
       <SavedKey settings={settings} />
       <p className="mt-2 text-sm text-text-muted">{STORED_WHILE_OFF}</p>
       <div className="mt-2 flex flex-wrap gap-2">
-        <RemoveKey />
+        <RemoveKeyButton remove={remove} onClick={() => remove.mutate()} />
       </div>
+      <RemoveKeyFailed remove={remove} />
     </Card>
   )
 }
 
 function KeyCard({ settings }: { settings: LlmSettings }) {
   const save = useSaveLlmKey()
+  const remove = useDeleteLlmKey()
   // Never pre-filled, since the server never sends the key back, and emptied the
   // moment it is sent: a typed key stays in this page no longer than the request.
   const [apiKey, setApiKey] = useState('')
@@ -162,6 +165,11 @@ function KeyCard({ settings }: { settings: LlmSettings }) {
     setReplacing(false)
   }
 
+  function removeKey() {
+    setSaveError(null)
+    remove.mutate(undefined, { onSuccess: () => setReplacing(false) })
+  }
+
   const saved = settings.status === 'ok' && !replacing
   // Whatever was pasted and not sent goes whenever the form opens or closes. The
   // handlers above cover a click. This covers the form closing with no click: a
@@ -177,11 +185,7 @@ function KeyCard({ settings }: { settings: LlmSettings }) {
   const needsNewKey = NEEDS_NEW_KEY[settings.status]
   // A key Anthropic refused, or one the server cannot read, can still be removed.
   const removeButton = settings.status !== 'none' && (
-    <RemoveKey
-      disabled={save.isPending}
-      onClick={() => setSaveError(null)}
-      onRemoved={() => setReplacing(false)}
-    />
+    <RemoveKeyButton remove={remove} disabled={save.isPending} onClick={removeKey} />
   )
 
   return (
@@ -269,6 +273,7 @@ function KeyCard({ settings }: { settings: LlmSettings }) {
           {saveError}
         </p>
       )}
+      <RemoveKeyFailed remove={remove} />
     </Card>
   )
 }
