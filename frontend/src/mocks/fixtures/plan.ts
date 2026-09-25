@@ -1,4 +1,4 @@
-import type { CookingView, PlanDay, WeekPlan } from '../../plan/types'
+import type { CookingView, PlanDay, PlanItem, WeekPlan } from '../../plan/types'
 
 /**
  * A Sunday-to-Saturday week with the constraints that make the planner
@@ -30,6 +30,8 @@ function day(
       portion,
       locked: options.lockedIndex === index,
       rationale: rationale === '' ? null : rationale,
+      description: null,
+      cooking_note: null,
     })),
   }
 }
@@ -92,6 +94,38 @@ export const PLAN_FIXTURE: WeekPlan = {
       ['Rava dosa', '2 pieces', ''],
     ]),
   ],
+}
+
+/**
+ * What `POST /plan/week/polish` attaches (plan 9). The text belongs to the dish,
+ * so a dish on two days carries the same words on both. Rice with sambar has no
+ * cooking tip: a tip is optional, and one that fails the server's check is dropped.
+ */
+export const PONGAL_TEXT = {
+  description: 'A soft, peppery porridge of rice and moong dal, finished with ghee and cumin.',
+  cooking_note: 'Roast the moong dal until it smells nutty before it goes in with the rice.',
+}
+export const SAMBAR_RICE_TEXT = {
+  description: 'Steamed rice under a tangy tamarind and lentil stew full of vegetables.',
+  cooking_note: null,
+}
+
+const POLISH_TEXT: Record<string, Pick<PlanItem, 'description' | 'cooking_note'>> = {
+  'Ven pongal': PONGAL_TEXT,
+  'Rice with sambar': SAMBAR_RICE_TEXT,
+}
+
+/**
+ * PLAN_FIXTURE as the polish endpoint answers it. Every other field is
+ * PLAN_FIXTURE's own, because a description never changes a dish, a portion or a
+ * rationale.
+ */
+export const POLISHED_PLAN_FIXTURE: WeekPlan = {
+  ...PLAN_FIXTURE,
+  days: PLAN_FIXTURE.days.map((planDay) => ({
+    ...planDay,
+    items: planDay.items.map((item) => ({ ...item, ...POLISH_TEXT[item.dish_name] })),
+  })),
 }
 
 export const COOKING_FIXTURE: CookingView = {

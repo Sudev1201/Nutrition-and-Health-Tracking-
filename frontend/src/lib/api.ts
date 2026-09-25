@@ -12,7 +12,8 @@ export class ApiError extends Error {
   }
 }
 
-async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
+/** Sends one request. An answer that is not 2xx throws an `ApiError` holding its body. */
+async function send(method: string, path: string, body?: unknown): Promise<Response> {
   const response = await fetch(`${API_BASE}${path}`, {
     method,
     credentials: 'include',
@@ -23,6 +24,11 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
   if (!response.ok) {
     throw new ApiError(response.status, await response.text())
   }
+  return response
+}
+
+async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
+  const response = await send(method, path, body)
   if (response.status === 204) {
     return null as T
   }
@@ -61,4 +67,18 @@ export function errorDetail(error: unknown, fallback: string): string {
     if (typeof detail === 'string' && detail.trim() !== '') return detail
   }
   return fallback
+}
+
+/**
+ * `api.post` for a route whose answer says something in a header as well as in
+ * its body. Plan 9's `POST /plan/week/polish` puts how many dishes it described
+ * in `X-Dishes-Described`. It sends through the same `send`, so it fails with
+ * the same `ApiError`, which `errorDetail` reads as it reads any other.
+ */
+export async function postWithHeaders<T>(
+  path: string,
+  body: unknown,
+): Promise<{ data: T; headers: Headers }> {
+  const response = await send('POST', path, body)
+  return { data: (await response.json()) as T, headers: response.headers }
 }
