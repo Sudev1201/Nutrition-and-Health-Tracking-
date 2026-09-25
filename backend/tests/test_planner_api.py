@@ -73,9 +73,13 @@ DISHES = [
 ]
 
 
-@pytest.fixture
-def planner_pool(db, reference_data) -> dict[str, Dish]:
-    """Seven dishes across every slot, one egg, one meat, one calcium-heavy drink."""
+def build_planner_pool(db) -> dict[str, Dish]:
+    """Seven dishes across every slot, one egg, one meat, one calcium-heavy drink.
+
+    A plain function so other test modules can build the same pool: a fixture
+    imported into another module trips ruff's F401 and F811. Needs
+    `reference_data` first, for the nutrients and the `test:rice` ingredient.
+    """
     nutrients = {n.code: n for n in db.scalars(select(Nutrient))}
     ingredients = {
         "test:rice": db.scalar(select(Ingredient).where(Ingredient.code == "test:rice"))
@@ -111,6 +115,12 @@ def planner_pool(db, reference_data) -> dict[str, Dish]:
         dishes[code] = dish
     db.flush()
     return dishes
+
+
+@pytest.fixture
+def planner_pool(db, reference_data) -> dict[str, Dish]:
+    """Seven dishes across every slot, one egg, one meat, one calcium-heavy drink."""
+    return build_planner_pool(db)
 
 
 NON_VEG_PROFILE = {**PROFILE, "diet_type": "non-vegetarian"}

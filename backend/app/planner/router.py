@@ -1,16 +1,40 @@
 import datetime
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.auth.deps import get_current_user
 from app.db import get_db
+from app.llm import crypto
+from app.llm import service as llm
+from app.llm.providers import (
+    MODEL_LABELS,
+    KeyRejected,
+    ModelUnavailable,
+    NoCredit,
+    Provider,
+    ProviderError,
+    get_provider,
+)
+from app.llm.router import NOT_SET_UP
 from app.models.user import User
-from app.planner import rules, service
+from app.planner import polish, rules, service
 
 router = APIRouter(prefix="/plan", tags=["plan"])
+
+NO_PLAN = "There is no plan for that week yet"
+NO_KEY = "Add your Anthropic API key under AI descriptions first"
+KEY_REFUSED = "Anthropic refused your saved key. Replace it under AI descriptions."
+MODEL_REFUSED = (
+    "Your Anthropic account can't use {label}. Choose another model under AI descriptions."
+)
+NO_CREDIT = "Your Anthropic account has no credit left."
+PROVIDER_DOWN = "Couldn't reach Anthropic. Your plan is unchanged."
+# On a polish's 200: how many dishes that request stored new text for. main.py's
+# CORS exposes it, so the Plan screen, on its own origin, can read it.
+DESCRIBED_HEADER = "X-Dishes-Described"
 
 
 class PlanItemOut(BaseModel):
@@ -21,6 +45,11 @@ class PlanItemOut(BaseModel):
     portion: str
     locked: bool
     rationale: str | None
+    # AI text for the dish, on the user's own key (plan 9): null until asked for.
+    # Two separate fields, so a description can never stand in for the dish's
+    # name, its portion or the planner's rationale.
+    description: str | None
+    cooking_note: str | None
 
 
 class PlanDayOut(BaseModel):
@@ -37,6 +66,10 @@ class WeekPlanOut(BaseModel):
 
 
 class RegenerateIn(BaseModel):
+    start: datetime.date
+
+
+class PolishIn(BaseModel):
     start: datetime.date
 
 
@@ -109,6 +142,65 @@ def regenerate_week(
     except service.NoProfile as exc:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Complete your profile first") from exc
     db.commit()
+    return _week_out(db, user, plan)
+
+
+def _model_label(db: Session, user: User) -> str:
+    """The saved model's name as the AI descriptions screen shows it."""
+    model = llm.summary(db, user).model
+    return MODEL_LABELS.get(model, model) if model else "this model"
+
+
+@router.post("/week/polish", response_model=WeekPlanOut)
+def polish_week(
+    payload: PolishIn,
+    response: Response,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+    provider: Provider = Depends(get_provider),
+) -> WeekPlanOut:
+    """Add AI descriptions to the week's dishes, on the user's own Anthropic key.
+
+    The only route that calls a model; generating, reading and re-planning never
+    wait on one. It writes `dish_polish` rows and nothing else: a failure rolls
+    back every row this request wrote, and the plan is as it was either way.
+
+    The answer is the week, as every plan route answers it, and DESCRIBED_HEADER
+    says how many dishes got new text. 0 is still a 200: every dish already had
+    text, or the model gave none the guard kept (a refusal, an answer cut off at
+    max_tokens, or only refused text), and those dishes stay undescribed.
+    """
+    _require_sunday(payload.start)
+    plan = service.get_plan(db, user, payload.start)
+    if plan is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, NO_PLAN)
+    try:
+        described = polish.polish_week(db, user, plan, provider)
+    except crypto.NotConfigured as exc:
+        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, NOT_SET_UP) from exc
+    except polish.NoKey as exc:
+        # Looking the key up may have just marked it unreadable. Keep that, so
+        # the AI descriptions screen can say so; nothing else has been written.
+        db.commit()
+        raise HTTPException(status.HTTP_409_CONFLICT, NO_KEY) from exc
+    except KeyRejected as exc:
+        db.rollback()
+        llm.mark_status(db, user, "rejected")
+        db.commit()
+        raise HTTPException(status.HTTP_409_CONFLICT, KEY_REFUSED) from exc
+    except ModelUnavailable as exc:
+        db.rollback()
+        detail = MODEL_REFUSED.format(label=_model_label(db, user))
+        raise HTTPException(status.HTTP_409_CONFLICT, detail) from exc
+    except NoCredit as exc:
+        db.rollback()
+        raise HTTPException(status.HTTP_409_CONFLICT, NO_CREDIT) from exc
+    except ProviderError as exc:
+        # ProviderUnavailable, and anything else the adapter raises in future.
+        db.rollback()
+        raise HTTPException(status.HTTP_502_BAD_GATEWAY, PROVIDER_DOWN) from exc
+    db.commit()
+    response.headers[DESCRIBED_HEADER] = str(described)
     return _week_out(db, user, plan)
 
 

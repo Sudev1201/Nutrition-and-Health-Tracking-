@@ -23,6 +23,7 @@ from app.foods.nutrition import (
     nutrients_for_portion,
 )
 from app.households import service as households
+from app.llm.providers import DishText
 from app.local_time import local_today
 from app.meal_slots import DEFAULT_SLOT_TIMES, SLOTS
 from app.models.food import Dish, DishIngredient, Ingredient, PortionMeasure
@@ -30,7 +31,7 @@ from app.models.plan import MealPlan, MealPlanItem
 from app.models.profile import AvoidedFood, FavouriteIngredient, MealSlotTime, Medication, Profile
 from app.models.user import User
 from app.nutrition_core.conditions import EMPTY_STOMACH_DRUGS, POTASSIUM_SPARING_DRUGS
-from app.planner import engine, rules
+from app.planner import engine, polish, rules
 from app.planner.engine import DayInput, NutrientGoal, PlannedItem
 from app.planner.rules import Candidate, DayRules, FoodRef, Observance, Portion
 from app.profiles import service as profiles
@@ -92,6 +93,11 @@ class ItemView:
     portion: str
     locked: bool
     rationale: str | None
+    # The user's own AI text for this dish (plan 9). Beside the planner's fields,
+    # never in place of them; null until they ask for descriptions, and for a
+    # dish whose cached text no longer matches what the dish is.
+    description: str | None = None
+    cooking_note: str | None = None
 
 
 @dataclass(frozen=True)
@@ -738,6 +744,20 @@ def swap_item(db: Session, user: User, item_id: uuid.UUID) -> MealPlan:
 # --- reading -------------------------------------------------------------------------------------
 
 
+def _item_view(item: MealPlanItem, dish: Dish, text: DishText | None) -> ItemView:
+    return ItemView(
+        id=item.id,
+        slot=item.slot,
+        dish_id=dish.id,
+        dish_name=dish.name,
+        portion=portion_label(item.measure_name, item.quantity, item.grams),
+        locked=item.locked,
+        rationale=item.rationale,
+        description=text.description if text is not None else None,
+        cooking_note=text.cooking_note if text is not None else None,
+    )
+
+
 def describe_week(db: Session, user: User, plan: MealPlan) -> WeekView:
     observances = [
         Observance(
@@ -755,6 +775,9 @@ def describe_week(db: Session, user: User, plan: MealPlan) -> WeekView:
         .where(MealPlanItem.plan_id == plan.id)
     ).all()
     order = {slot: index for index, slot in enumerate(SLOTS)}
+    # By dish, not by plan item: a swapped-in or regenerated dish shows its own
+    # text or none, so nothing has to be cleared when an item changes.
+    texts = polish.current_polish(db, user, {dish.id for _, dish in rows})
 
     days = []
     for offset in range(WEEK_DAYS):
@@ -762,15 +785,7 @@ def describe_week(db: Session, user: User, plan: MealPlan) -> WeekView:
         reason = rules.vegetarian_reason(day, observances)
         items = sorted(
             (
-                ItemView(
-                    id=item.id,
-                    slot=item.slot,
-                    dish_id=dish.id,
-                    dish_name=dish.name,
-                    portion=portion_label(item.measure_name, item.quantity, item.grams),
-                    locked=item.locked,
-                    rationale=item.rationale,
-                )
+                _item_view(item, dish, texts.get(dish.id))
                 for item, dish in rows
                 if item.plan_date == day
             ),

@@ -18,6 +18,7 @@ from app.households.router import router as households_router
 from app.llm import crypto
 from app.llm.router import NO_STORE, NOT_UNDERSTOOD
 from app.llm.router import router as llm_router
+from app.planner.router import DESCRIBED_HEADER
 from app.planner.router import router as planner_router
 from app.profiles.router import router as profile_router
 from app.reminders.router import push_router, settings_router
@@ -65,6 +66,8 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    # A cross-origin fetch shows a script only the response headers listed here.
+    expose_headers=[DESCRIBED_HEADER],
 )
 
 app.include_router(auth_router)
