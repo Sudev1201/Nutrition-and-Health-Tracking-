@@ -25,9 +25,9 @@ function SidebarLink({ path, label, icon: Icon, exact }: NavItem) {
 
 /**
  * The wide-screen navigation. A phone has room for five tabs, so Weight, Cycle,
- * Household, Reminders and Profile hide behind More there — but a 1440px window
- * has room for all of them, and importing the phone's constraint would be
- * gratuitous. Same `navigation.ts` source, different affordance.
+ * Household, Reminders, AI descriptions and Profile hide behind More there — but
+ * a 1440px window has room for all of them, and importing the phone's constraint
+ * would be gratuitous. Same `navigation.ts` source, different affordance.
  */
 export function Sidebar() {
   return (

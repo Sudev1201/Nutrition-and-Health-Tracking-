@@ -8,6 +8,7 @@ import {
   PlusCircle,
   Scale,
   Settings,
+  Sparkles,
   Users,
 } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
@@ -41,6 +42,7 @@ export const MORE_NAV: readonly NavItem[] = [
   { path: '/cycle', label: 'Cycle', icon: Droplet },
   { path: '/household', label: 'Household', icon: Users },
   { path: '/reminders', label: 'Reminders', icon: ClipboardList },
+  { path: '/ai-descriptions', label: 'AI descriptions', icon: Sparkles },
   { path: '/profile', label: 'Profile', icon: Settings },
 ]
 

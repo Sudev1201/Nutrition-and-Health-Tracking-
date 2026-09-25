@@ -8,6 +8,7 @@ import { LogScreen } from './log/LogScreen'
 import { ProfileEditRoute } from './profile/ProfileEditRoute'
 import { ProfileScreen } from './profile/ProfileScreen'
 import { PlanScreen } from './plan/PlanScreen'
+import { AiDescriptionsScreen } from './settings/AiDescriptionsScreen'
 import { RemindersScreen } from './settings/RemindersScreen'
 import { AppShell } from './shell/AppShell'
 import { MoreScreen } from './shell/MoreScreen'
@@ -60,6 +61,7 @@ export default function App() {
           <Route path="/cycle" element={<CycleScreen />} />
           <Route path="/household" element={<HouseholdScreen />} />
           <Route path="/reminders" element={<RemindersScreen />} />
+          <Route path="/ai-descriptions" element={<AiDescriptionsScreen />} />
           {/*
             The summary is the destination; the questionnaire is reached from it
             per section. `/profile` used to render the eight-step form itself, so
