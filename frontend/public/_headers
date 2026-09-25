@@ -1,0 +1,34 @@
+# Cloudflare Pages response headers. Vite copies this file from public/ into dist/,
+# where Pages reads it. Pages never serves it, and the service worker never precaches it.
+#
+# Every rule whose path matches a request applies, and a header that two rules set is
+# joined with a comma. So there is deliberately no catch-all /* rule: its value would
+# be added to the immutable one below.
+
+# The service worker and what it is installed from. A browser fetches sw.js past its
+# HTTP cache when it checks for an update, but by default lets the scripts sw.js
+# imports come from that cache, so a cached push-handlers.js could outlive the sw.js
+# that expects it.
+/sw.js
+  Cache-Control: no-cache
+/push-handlers.js
+  Cache-Control: no-cache
+/registerSW.js
+  Cache-Control: no-cache
+/manifest.webmanifest
+  Cache-Control: no-cache
+
+# The app shell. Pages answers "/" and every SPA route with index.html, and redirects
+# /index.html itself to "/". The routes (/plan, /foods, ...) keep Pages' default,
+# "public, max-age=0, must-revalidate", which also checks on every load.
+/
+  Cache-Control: no-cache
+/index.html
+  Cache-Control: no-cache
+
+# Content-hashed files: a new build gives them new names, so a cached copy is never
+# stale.
+/assets/*
+  Cache-Control: public, max-age=31536000, immutable
+/workbox-*.js
+  Cache-Control: public, max-age=31536000, immutable

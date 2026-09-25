@@ -1,0 +1,10 @@
+# Cloudflare Pages redirects. This file has no rules, on purpose.
+#
+# The SPA needs none. While the build has no top-level 404.html, Pages answers every
+# path that is not a file (/plan, /foods, /profile/goals, ...) with /index.html and a
+# 200.
+#
+# Do not add the usual "/*  /index.html  200". Pages drops that exact rule as an
+# infinite loop. Any other catch-all 200 is worse: Pages applies these rules before it
+# looks for a file, so "/*  /  200" answers /sw.js and every script under /assets/
+# with index.html, and the app never loads.
