@@ -1,8 +1,16 @@
 name: CI
 
+# A pull request runs once, for its own event, and a push runs only on main, where it
+# checks what was merged. Before, both events fired for every push to a pull request's
+# branch. Nothing here deploys: no registry push, no flyctl or wrangler, no secrets.
 on:
   push:
+    branches: [main]
   pull_request:
+
+# Every job only reads the repository.
+permissions:
+  contents: read
 
 jobs:
   backend:
@@ -24,7 +32,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v5
-      - run: uv sync
+      # --locked fails when uv.lock no longer matches pyproject.toml, as the image
+      # build does, instead of quietly re-resolving. uv reads the Python version
+      # from backend/.python-version, the image's 3.13.
+      - run: uv sync --locked
         working-directory: backend
       - run: uv run ruff check .
         working-directory: backend
@@ -54,8 +65,170 @@ jobs:
         working-directory: frontend
       - run: npx vitest run
         working-directory: frontend
-      - run: npm run build
+      - run: npm run lint
         working-directory: frontend
+      # Built the way a deploy builds it, with placeholders for the two public values.
+      # vite.config.ts refuses a production build without VITE_API_BASE, which would
+      # otherwise call http://localhost:8000.
+      - name: Build
+        run: npm run build
+        working-directory: frontend
+        env:
+          VITE_API_BASE: https://api.example.invalid
+          VITE_GOOGLE_CLIENT_ID: ci-placeholder
+      # Each check calls fail() rather than ending in `! grep`: bash -e ignores a
+      # failure negated with `!`, so such a line could never fail the step.
+      - name: Check the build output
+        working-directory: frontend
+        run: |
+          fail() { echo "::error::$*"; exit 1; }
+
+          # The API base went in, and the localhost fallback did not.
+          grep -rq 'https://api.example.invalid' dist/assets \
+            || fail "the bundle does not use VITE_API_BASE"
+          if grep -rl 'localhost:8000' dist/assets; then
+            fail "the files above call http://localhost:8000"
+          fi
+
+          # Cloudflare Pages reads both files from the build output.
+          [ -f dist/_headers ] || fail "dist/_headers is missing"
+          [ -f dist/_redirects ] || fail "dist/_redirects is missing"
+
+          # Pages answers an unknown path with index.html only while the build has no
+          # top-level 404.html. It applies _redirects before it looks for a file, so any
+          # rule there could answer /sw.js with index.html (frontend/public/_redirects).
+          [ ! -e dist/404.html ] || fail "dist/404.html turns off the Pages SPA fallback"
+          if grep -Ev '^[[:space:]]*(#|$)' dist/_redirects; then
+            fail "dist/_redirects has the rule above"
+          fi
+
+          # The generated worker loads the push handlers, and the file ships beside it.
+          grep -q 'importScripts("push-handlers.js")' dist/sw.js \
+            || fail "dist/sw.js does not import push-handlers.js"
+          [ -f dist/push-handlers.js ] || fail "dist/push-handlers.js is missing"
+
+          # No navigation denylist: the old one caught the SPA's own /foods route.
+          if grep -o 'denylist:[^}]*' dist/sw.js; then
+            fail "dist/sw.js still has the navigation denylist above"
+          fi
+
+  image:
+    # The API image a deploy would ship, run the way Fly runs it: the release step
+    # against a real Postgres, then the server. It is loaded into this runner's
+    # Docker and never pushed anywhere.
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: healthmonitor
+          POSTGRES_PASSWORD: healthmonitor
+          POSTGRES_DB: healthmonitor
+        ports:
+          - 5433:5432
+        options: >-
+          --health-cmd "pg_isready -U healthmonitor"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      IMAGE: healthmonitor-api:ci
+      # The service's port on the runner. Every `docker run` below that needs the
+      # database uses --network host, so localhost in the container is the runner.
+      DATABASE_URL: postgresql+psycopg://healthmonitor:healthmonitor@localhost:5433/healthmonitor
+    steps:
+      - uses: actions/checkout@v4
+
+      # A checkout has no .env and no snapshot, so without decoys the check below
+      # could never fail for them. It does have scripts/e2e_seed.py and
+      # e2e_session.py, and the third decoy stands for any e2e script added later.
+      # With the decoys in place, only backend/.dockerignore keeps them out.
+      - name: Put decoys where .dockerignore must stop them
+        run: |
+          set -o noclobber   # never overwrite a real one
+          printf 'SESSION_SECRET=decoy-that-must-not-reach-the-image\n' > backend/.env
+          mkdir -p backend/seed-snapshot
+          printf '{}\n' > backend/seed-snapshot/manifest.json
+          printf 'raise SystemExit("a decoy that must not reach the image")\n' \
+            > backend/scripts/e2e_decoy.py
+
+      - uses: docker/setup-buildx-action@v4
+      - name: Build the image
+        uses: docker/build-push-action@v7
+        with:
+          context: backend
+          load: true
+          push: false
+          tags: ${{ env.IMAGE }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: It runs as a non-root user, and ships no .env, tests, snapshot or e2e scripts
+        run: |
+          fail() { echo "::error::$*"; exit 1; }
+          uid="$(docker run --rm "$IMAGE" id -u)"
+          echo "the image runs as uid $uid"
+          [ "$uid" != 0 ] || fail "the image runs as root"
+          # The container's shell expands the glob, and ls prints only the paths that
+          # exist. The glob covers e2e_session.py, which signs a real session for any
+          # user it is pointed at, e2e_seed.py and the decoy. `; true` because ls
+          # exits 2 for a missing path, and in a good image every path is missing.
+          shipped="$(docker run --rm "$IMAGE" sh -c \
+            'ls -d /app/.env /app/tests /app/seed-snapshot /app/scripts/e2e_*.py 2>/dev/null; true')"
+          if [ -n "$shipped" ]; then
+            echo "$shipped"
+            fail "the image ships the files above"
+          fi
+
+      # Fly's release_command, `alembic upgrade head`, from the image against an empty
+      # database. Then `alembic check`: the image's models match its migrations.
+      - name: The release step migrates a fresh database
+        run: |
+          docker run --rm --network host -e DATABASE_URL="$DATABASE_URL" "$IMAGE" \
+            alembic upgrade head
+          docker run --rm --network host -e DATABASE_URL="$DATABASE_URL" "$IMAGE" \
+            alembic check
+
+      - name: Boot the API from the image
+        run: docker run -d --name api --network host -e DATABASE_URL="$DATABASE_URL" "$IMAGE"
+      - name: Wait for /health
+        run: |
+          for _ in $(seq 1 30); do
+            curl -sf http://localhost:8000/health && exit 0
+            sleep 1
+          done
+          echo "the image did not come up. Its log:" >&2
+          docker logs api >&2
+          exit 1
+
+      # APP_ENV=production and nothing else: the development session secret, no
+      # Google client id, insecure cookies, an http origin and a localhost database.
+      # Settings must name all five and stop the import, so uvicorn exits before it
+      # serves anything. `timeout` stops the step if the image ever serves instead.
+      - name: It refuses to start in production with development settings
+        run: |
+          fail() { echo "::error::$*"; exit 1; }
+          log="$RUNNER_TEMP/refusal.log"
+          exit_code=0
+          timeout 60 docker run --rm -e APP_ENV=production "$IMAGE" > "$log" 2>&1 || exit_code=$?
+          cat "$log"
+          [ "$exit_code" != 0 ] || fail "the image started in production with development settings"
+          [ "$exit_code" != 124 ] || fail "the image was still running after 60 seconds"
+          for problem in \
+            'Refusing to start in production' \
+            'SESSION_SECRET is the development default or shorter than 32 characters' \
+            'GOOGLE_CLIENT_ID is empty' \
+            'COOKIE_SECURE must be true' \
+            'FRONTEND_ORIGIN must be an https:// origin with no trailing slash' \
+            'DATABASE_URL points at localhost'; do
+            grep -qF "$problem" "$log" || fail "the refusal does not say: $problem"
+          done
+          # Pydantic ends a validation message with the settings' input unless told
+          # not to (hide_input_in_errors in app/config.py), and in production that
+          # input holds the database password, the session secret and the LLM keyring.
+          if grep -F 'input_value' "$log"; then
+            fail "the refusal prints the settings' input"
+          fi
 
   e2e:
     # The end-to-end walk goes through the real backend and a real Postgres, so
@@ -83,7 +256,7 @@ jobs:
         with:
           node-version: '22'
 
-      - run: uv sync
+      - run: uv sync --locked
         working-directory: backend
       - run: uv run alembic upgrade head
         working-directory: backend
@@ -111,6 +284,8 @@ jobs:
           cat /tmp/api.log >&2
           exit 1
 
+      # Playwright serves the SPA with `npm run dev`, so this job never makes a
+      # production build and needs no VITE_API_BASE.
       - run: npm ci
         working-directory: frontend
       - run: npx playwright install --with-deps chromium
