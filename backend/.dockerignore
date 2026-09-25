@@ -1,0 +1,29 @@
+# What the image must never carry. The build context is backend/.
+
+# Local settings and secrets. Settings reads .env from the working directory,
+# so one baked in would quietly override the platform's environment.
+.env
+.env.*
+
+# Local tooling and caches.
+.venv
+.pytest_cache
+.ruff_cache
+**/__pycache__
+**/*.py[cod]
+**/.DS_Store
+
+# The tests, and the development-only scripts: e2e_session.py signs a real
+# session for any user it is pointed at.
+tests
+scripts/e2e_*.py
+
+# Downloaded ETL sources and the seed snapshot. Both are large, and IFCT has no
+# open licence, so neither may ship in an image that could be pulled.
+etl/.cache
+seed-snapshot
+
+# The deploy files themselves, so editing them does not rebuild the code layer.
+Dockerfile
+.dockerignore
+fly.toml

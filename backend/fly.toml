@@ -1,0 +1,56 @@
+# Fly.io config for the API: `fly deploy` from backend/ builds ./Dockerfile.
+#
+# Nothing in this file is secret, and no secret belongs here. DATABASE_URL,
+# SESSION_SECRET, GOOGLE_CLIENT_ID, VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY and
+# LLM_KEY_ENCRYPTION_KEYS go in with `fly secrets set`; DEPLOY.md lists them.
+# Before a first deploy, replace the app name, both example.com values and the
+# VAPID contact below.
+
+app = "healthmonitor-api"
+# Mumbai, beside Neon's aws-ap-south-1. Check both are still offered.
+primary_region = "bom"
+kill_signal = "SIGTERM"
+# Time for the lifespan to cancel the reminder loop and for requests to finish.
+kill_timeout = "30s"
+
+[build]
+  dockerfile = "Dockerfile"
+
+[deploy]
+  # Runs once per deploy, on a temporary machine with the app's secrets, before
+  # the new version starts. A failure stops the deploy. Never in the image's CMD,
+  # where two machines starting at once would race on the same migration.
+  release_command = "alembic upgrade head"
+  strategy = "rolling"
+
+[env]
+  # Settings refuses to start unless the secrets above are set and safe.
+  APP_ENV = "production"
+  FRONTEND_ORIGIN = "https://app.example.com"
+  COOKIE_SECURE = "true"
+  # Plan 8's reminder loop runs in the API process. It warns and stays idle
+  # until both VAPID keys are set.
+  SCHEDULER_ENABLED = "true"
+  VAPID_SUBJECT = "mailto:owner@example.com"
+
+[http_service]
+  internal_port = 8000
+  force_https = true
+  # Exactly one machine, always running: a stopped machine sends no reminders,
+  # and every extra one runs its own reminder loop. `fly deploy --ha=false`
+  # keeps a first deploy from creating a second machine.
+  auto_stop_machines = "off"
+  auto_start_machines = true
+  min_machines_running = 1
+
+  [[http_service.checks]]
+    # /health answers without touching the database.
+    method = "GET"
+    path = "/health"
+    interval = "15s"
+    timeout = "5s"
+    grace_period = "10s"
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "512mb"
