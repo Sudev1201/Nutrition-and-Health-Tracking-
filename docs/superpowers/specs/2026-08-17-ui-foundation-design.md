@@ -99,11 +99,13 @@ Defined by the handlers in `frontend/src/mocks/handlers/` and typed in each feat
 | `GET/PUT /profile` | `src/onboarding/types.ts` | Plan 4 |
 | `GET /targets/today?date=` | `src/today/types.ts` | Plans 3–4 |
 | `GET /diary?date=`, `POST/DELETE /diary/entries` | `src/log/types.ts` | Plan 5 |
-| `GET /plan/week?start=`, swap / lock / regenerate, `GET /plan/cooking` | `src/plan/types.ts` | Plan 6 |
+| `GET /plan/week?start=`, swap / lock / regenerate, `GET /plan/cooking` | `src/plan/types.ts` | Plan 6; plan 9 adds each item's `description` and `cooking_note` |
 | `GET /reports/week?start=` | `src/report/types.ts` | Plan 8 (built; contract amended) |
 | `GET/POST /weight`, `DELETE /weight/{date}` | `src/weight/types.ts` | Plan 7 (built; contract amended) |
 | `GET/PATCH/DELETE /cycle`, `PUT/DELETE /cycle/days/{date}`, `POST /cycle/screening` | `src/cycle/types.ts` | Plan 7 (built; contract amended) |
 | `GET/PATCH /settings/reminders`, `GET /push/public-key`, `POST/DELETE /push/subscriptions` | `src/settings/types.ts` | Plan 8 (built; contract amended) |
+| `GET/PUT/DELETE /settings/llm` | `src/settings/types.ts` | Plan 9 (built; new) |
+| `POST /plan/week/polish`, answering the week and an `X-Dishes-Described` header | `src/plan/types.ts` | Plan 9 (built; new) |
 
 Two shape notes worth carrying into the backend plans:
 

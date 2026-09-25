@@ -35,6 +35,27 @@
 - "Prerequisite: Google OAuth client": the production origin over HTTPS, and no client secret.
 - Implementation Sequence steps 12 and 13.
 
+**Status:** Complete as configuration: nothing is deployed, and `DEPLOY.md` lists what the
+owner does by hand. 1279 backend tests and 374 frontend tests passing, plus 10 Playwright
+end-to-end tests; `ruff`, `alembic check`, `tsc -b`, `oxlint` and `vite build` clean; the
+image builds, runs as a non-root user and refuses a production start with development
+settings.
+
+**Changed during execution** (rulings made while the tasks ran; the text below is as planned):
+- `rotate_all` opens every stored token, including those already under the newest key, and
+  re-checks its user binding. A current token copied to another user's row is marked
+  `unreadable`, not counted as current.
+- A failed polish marks the stored key `rejected` (or `unreadable`) in `user_settings`. "Polish
+  writes only to `dish_polish`" therefore means that no plan table is ever written.
+- The guard's `BANNED_WORDS` also holds bowl, glass and piece and their plurals, the measures
+  the planner's own portions use (see Known gaps).
+- The test helpers `set_keyring` and `sql_statements(db)` live in `tests/conftest.py`, shared
+  by the LLM and polish tests.
+- The AI descriptions screen shares only the presentational `RemoveKeyButton` and
+  `RemoveKeyFailed`; each card owns its own delete mutation.
+- `PlanScreen` passes the cache-based `regenerating` to `DayPanel`, so the lockout survives a
+  remount.
+
 ## Global Constraints
 
 **Backend tooling**
@@ -12691,6 +12712,9 @@ Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>"
   - A nutrition or health claim made in other words passes: "Rich in iron", "good for the bones", "wholesome", "helps digestion" and "light on the stomach" all pass `polish.BANNED_WORDS`.
   - "Iron" is left out on purpose, so that "a cast-iron pan" survives.
   - The system prompt forbids health advice, but nothing checks a claim made in other words.
+- **The guard's word list has known holes beyond "rich in iron", and one deliberate over-reach.**
+  - "Plate" and "helping" (not measures the planner uses), "thrice", "pinch", "handful", "spoonful", and non-ASCII look-alike letters all pass.
+  - "Bowl", "glass" and "piece" (and their plurals) were added during execution, because the planner's own portions use them. So a description such as "a comforting bowl of rasam" is refused, and that dish goes undescribed.
 - **A polish that yields nothing is still billed.**
   - A refusal, an answer cut off at its length limit, or text the guard refuses entirely stores nothing, and the dishes stay undescribed. Anthropic still bills the user's account for the request.
   - Nothing is cached for a dish that got no text, so another click sends the same dishes again, and bills them again.
@@ -12700,6 +12724,11 @@ Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>"
   - The request's session stays open for every batch: up to 120 s a call, plus one retry.
   - The pool has 5 connections and 10 overflow per process, so a burst of concurrent polishes can starve other requests.
 - **A long `retry-after` holds a request.** The SDK waits out a 429's `retry-after`, however long, before its one retry.
+- **Polish feedback is lost after leaving the Plan screen mid-polish.**
+  - If the user navigates away while "Add descriptions" runs and comes back, the buttons stay locked until it ends, and the new descriptions appear.
+  - But the completion line ("Claude added no new descriptions this time.") and any failure alert do not show: they read the screen's own mutation observer, which starts idle after a remount.
+  - A fix would read `useMutationState` over the `['plan', 'polish']` mutation key.
+- **`rotate_all` counts already-unreadable rows again on every run.** A row no key opens stays in place, marked `unreadable`, so the `unreadable` count falls only as those users enter their keys again.
 - **Changing the model means entering the key again**, because the key is checked against the model it will be used with.
 - **The refusal fallback is on for `claude-opus-5` only.**
   - Whether Claude Sonnet 5 and Claude Haiku 4.5 accept `fallbacks="default"` is not verified, and a 400 there would break polish.
@@ -12718,6 +12747,8 @@ Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>"
 **Deploy**
 - **Nothing is deployed.** No account, domain, DNS record, pushed image or production secret exists. `DEPLOY.md` lists the steps, in order.
 - **`backend/fly.toml` has never been validated by `flyctl`.** `fly config validate` needs the CLI and an account, and the runbook runs it before the first deploy.
+- **A hostless `DATABASE_URL` passes the production localhost refusal.** `postgresql+psycopg:///hm`, a Unix-socket URL, has no host, so it is not refused. A hosted Postgres URL always carries a host.
+- **The runtime image relies on its base image for CA certificates.** The Anthropic SDK's HTTP client (`httpx2`, through `truststore`) trusts the operating system's store. `python:3.13-slim-bookworm` ships `ca-certificates`, and Task 9's rehearsal found it there, but nothing in the Dockerfile installs or asserts it.
 - **CI boots the image with development settings only.**
   - Its boot step sets no `APP_ENV`, so the server it waits on runs on the development defaults. In CI, the production path is exercised only by the refusal check.
   - So a change that made the production validator refuse a clean production configuration would still pass CI. The one production boot is Task 9's local rehearsal, against a scratch database on the compose network.
@@ -12751,6 +12782,8 @@ Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>"
 - **A day logged only with foods that have no nutrient rows reads as untracked**, although the diary has an entry.
 - **Only sodium's lowered ceiling is explained on Today.** Saturated fat, free sugar and cholesterol render as `StatTile`s, which show no carry, and so does a lowered energy target.
 - **The "Lowered by" note can overstate the drop.** It prints the raw negative carry, while `effective_target` clamps at the EAR.
+- **A salty day's lowering can chain past two days.** A surplus is measured against the already-lowered ceiling (the spec's delta = consumed - effective target, the same rule shortfalls follow), so a day under the base ceiling but over the lowered one counts as over the limit and carries a little further, bounded by the 30% cap per source day. Measuring a ceiling's surplus against its base ceiling would stop it.
+- **The Report screen's Next stops at the browser's current week**, so a browser whose clock is behind the account's timezone cannot reach the server's week in progress; the household card mirrors this.
 
 *The planner*
 - **The planner's emphasis is invisible.** `WeekPlanOut` does not carry it, so the Plan screen cannot say it is leaning on calcium because of last week.
@@ -12760,6 +12793,7 @@ Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>"
   - Vitamin K has no `rda_reference` row, so it has no target. That leaves nothing to filter a dish against, and it leaves the planner's hold-steady penalty inert in production: `_hold_steady_penalty` finds no vitamin K goal.
   - Seeding a sourced vitamin K reference would allow both a report filter and a working penalty. The filter would drop dishes whose default portion alone moves vitamin K by more than `HOLD_STEADY_TOLERANCE` of its goal.
   - Potassium needs no such filter: on a potassium-sparing drug it keeps its base AI, and the planner fills that AI itself.
+- **Asking for next week's plan mid-week freezes a partial-week emphasis until a regenerate.** The emphasis is read from the week before the plan's, which has not finished yet; the screen only asks for the current week.
 
 *Households*
 - **Daily progress is not shared.**
@@ -12774,6 +12808,7 @@ Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>"
 - **A session that ends without a sign-out leaves the device subscribed** to the previous account. That covers cookie expiry and cleared cookies. The screen reads it as "on" for whoever signs in next.
 - **A subscription under an old VAPID key pair reads as on but is never reminded.** Turning it off and on again fixes it.
 - **Push cannot be exercised by the e2e walks.** The dev server registers no service worker. Manual spec step 16 needs a production build and VAPID keys.
+- **`pywebpush` brings `aiohttp` and six small packages into the lock file.**
 
 *Pre-existing gaps*
 - **Concurrent double submits can answer 500** on the unique constraints of check-then-insert upserts: weigh-ins, cycle settings and reminder rows.

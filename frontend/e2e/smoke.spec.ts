@@ -27,6 +27,9 @@ import { expect, test } from '@playwright/test'
  *    says so, and the week in progress is as far as it goes.
  *  - Meal reminders on the real settings endpoint: a slot switched off stays off
  *    across a reload, and the mid-morning snack starts off.
+ *  - AI descriptions without a key: the screen shows what the real settings
+ *    endpoint says (not set up on this server, or no key saved yet), and the Plan
+ *    screen offers no descriptions. No walk enters a key, so no run reaches Anthropic.
  */
 
 const SEARCH_DEBOUNCE_MS = 400
@@ -333,5 +336,46 @@ test.describe('the tracking loop', () => {
 
     // The mid-morning snack reminds nobody by default.
     await expect(page.getByRole('switch', { name: /mid-morning snack|snack 1/i })).not.toBeChecked()
+  })
+
+  test('AI descriptions stay off without a key, and the plan offers none', async ({ page }) => {
+    // The server decides what the screen shows. CI starts the API with no
+    // LLM_KEY_ENCRYPTION_KEYS, so the feature is off there; a developer's backend/.env
+    // may set it. Either way globalSetup's reset left this user with no key, and this
+    // walk never enters one, so nothing here can reach Anthropic.
+    const api = 'http://localhost:8000'
+    const llm = (await (await page.request.get(`${api}/settings/llm`)).json()) as {
+      available: boolean
+      status: string
+      key_hint: string | null
+    }
+    expect(llm.status).toBe('none')
+    expect(llm.key_hint).toBeNull()
+
+    await page.goto('/ai-descriptions')
+    await expect(page.getByRole('heading', { name: 'AI descriptions' })).toBeVisible()
+    if (llm.available) {
+      // A keyring but no key yet: the form, empty.
+      await expect(page.getByLabel('Anthropic API key')).toHaveValue('')
+      await expect(page.getByRole('button', { name: 'Save key' })).toBeVisible()
+    } else {
+      await expect(page.getByText('AI descriptions are not set up on this server')).toBeVisible()
+      await expect(page.getByLabel('Anthropic API key')).toHaveCount(0)
+    }
+    await expect(page.getByRole('alert')).toHaveCount(0)
+
+    // No saved key, so the Plan screen offers no descriptions and shows none. Wait for
+    // the screen's own read of the settings: before it lands, a missing button proves
+    // nothing.
+    const settingsRead = page.waitForResponse(
+      (response) =>
+        response.request().method() === 'GET' && response.url().includes('/settings/llm'),
+    )
+    await page.goto('/plan')
+    await settingsRead
+    await expect(page.getByRole('region', { name: 'Saturday' })).toBeVisible()
+    await expect(page.getByRole('button', { name: /regenerate week/i })).toBeVisible()
+    await expect(page.getByRole('button', { name: 'Add descriptions' })).toHaveCount(0)
+    await expect(page.getByText('Cooking tip')).toHaveCount(0)
   })
 })

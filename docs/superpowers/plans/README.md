@@ -16,7 +16,7 @@ begins.
 | 6 | Meal planner | 7-day generation, swap/lock/regenerate, intra-day re-plan, household cooking view | **Complete** — `2026-09-02-meal-planner.md`. Generated on demand rather than on a Saturday schedule; one dish per slot (the paired snack beverage needs a beverage tag the seed data lacks) |
 | 7 | Weight & cycle | Weigh-ins, trend smoothing, calorie recalibration, cycle logging and coaching | **Complete** — `2026-09-24-weight-and-cycle.md`. Recalibration is evaluated when a weigh-in is posted rather than on a schedule; postmenopausal status and the IOM iron fallback live on the profile |
 | 8 | Weekly report & reminders | Nutrient report, uncompensated gaps, next-week suggestions, web push at meal times | **Complete** — `2026-09-24-report-and-reminders.md`. The report is derived on demand; suggestions weight the next week's plan; reminders are web push behind a channel interface, sent by an opt-in in-process scheduler or a cron CLI |
-| 9 | LLM polish & deploy | BYO-key polish adapter, hosting, domain, seed migration | Not started |
+| 9 | LLM polish & deploy | BYO-key polish adapter, hosting, domain, seed migration | **Complete as configuration; nothing deployed** — `2026-09-24-ai-descriptions-and-deploy.md`. AI descriptions are asked for on demand with the user's own Anthropic key, cached per dish, and never change a dish or a number. The image, Fly and Cloudflare Pages config, production settings checks, the seed snapshot and CI's image checks are rehearsed locally, though CI has never run on GitHub; `DEPLOY.md` lists what the owner does by hand |
 
 Order matters: plans 2 and 3 are independent of each other but both gate plan 4, and everything
 downstream depends on plan 3's engine.
@@ -41,6 +41,15 @@ Plan 7's decisions and the gaps it leaves are recorded at the top and bottom of
 
 Plan 8's decisions and the gaps it leaves are recorded at the top and bottom of
 `2026-09-24-report-and-reminders.md`.
+
+Plan 9's decisions and the gaps it leaves are recorded at the top and bottom of
+`2026-09-24-ai-descriptions-and-deploy.md`. It stops short of going live: no account,
+domain, DNS record or pushed image exists. `DEPLOY.md` at the repository root is the runbook
+for that step, in the order the owner takes it.
+
+With plan 9, the spec's implementation sequence is built up to step 13, except the deploy
+itself. What remains is the owner's first deploy and phase 2: WhatsApp as a second reminder
+channel, and the prescription and meal-alteration work that plan 5's closeout moved there.
 
 Each plan is written only when its predecessor is complete, so it can account for what actually
 got built rather than what was predicted.
