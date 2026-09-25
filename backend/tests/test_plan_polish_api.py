@@ -343,6 +343,36 @@ def test_only_text_that_passes_the_guard_is_kept(
     assert {model for _, _, model in rows.values()} == {"claude-opus-5"}
 
 
+def test_a_note_naming_a_household_measure_is_stored_as_null(
+    signed_in, planner_pool, llm_keyring, fake_provider, db
+):
+    planned(signed_in)
+    fake_provider.texts = {
+        "d1": DishText(
+            "A soft steamed rice cake.", "Have a bowl of it with a glass of buttermilk."
+        ),
+        "d2": DishText("A Glass of cold buttermilk.", "Serve it chilled."),
+        "d3": DishText("A tangy lentil stew.", "Break the papad into PIECES over it."),
+    }
+
+    polished = described(signed_in)
+
+    sent = {brief.ref: brief.name for brief in fake_provider.polished[0][2]}
+    shown = {
+        item["dish_name"]: (item["description"], item["cooking_note"]) for item in items(polished)
+    }
+    # The description stands, and the failing note is stored as null.
+    assert shown[sent["d1"]] == ("A soft steamed rice cake.", None)
+    assert shown[sent["d3"]] == ("A tangy lentil stew.", None)
+    # A description naming a measure leaves the dish undescribed.
+    assert shown[sent["d2"]] == (None, None)
+    rows = polish_rows(db)
+    assert {db.get(Dish, dish_id).name: row[:2] for dish_id, row in rows.items()} == {
+        sent["d1"]: ("A soft steamed rice cake.", None),
+        sent["d3"]: ("A tangy lentil stew.", None),
+    }
+
+
 def test_an_answer_for_a_reference_that_was_not_sent_is_dropped(
     signed_in, planner_pool, llm_keyring, fake_provider, db
 ):

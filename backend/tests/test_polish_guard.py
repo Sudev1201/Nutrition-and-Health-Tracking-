@@ -103,6 +103,11 @@ def test_a_multiplier_is_refused(text):
         "A katori of curd on the side",
         "A tumbler of buttermilk after",
         "A ladle of sambar over the rice",
+        "Have a bowl of this with a glass of buttermilk",
+        "Serve it in bowls with chutney",
+        "Pour it into glasses to set",
+        "A piece of jaggery on the side",
+        "Cut it into pieces while warm",
     ],
 )
 def test_a_unit_or_a_measure_is_refused(text):
@@ -146,6 +151,8 @@ def test_every_banned_word_is_refused_in_any_case(word):
         "Finish with a little honey.",
         "Soften the onions first.",
         "Often served at breakfast.",
+        "A glassy sheen on the onions.",
+        "A little masterpiece of a breakfast.",
     ],
 )
 def test_a_banned_word_inside_a_longer_word_does_not_count(text):
@@ -163,6 +170,14 @@ def test_the_pulses_called_gram_are_ingredients_not_units():
     assert clean("Soaked Bengal gram tossed with grated coconut.") == (
         "Soaked Bengal gram tossed with grated coconut."
     )
+
+
+@pytest.mark.parametrize("word", ["bowl", "bowls", "glass", "glasses", "piece", "pieces"])
+def test_the_planners_generic_measures_are_banned(word):
+    # The seeded recipes and foods.measures.GENERIC_MEASURES write portions in these.
+    assert word in BANNED_WORDS
+    for form in (word, word.upper(), word.capitalize()):
+        assert clean(f"Serve it with a {form} of buttermilk.") is None, form
 
 
 def test_iron_is_left_for_the_pan():

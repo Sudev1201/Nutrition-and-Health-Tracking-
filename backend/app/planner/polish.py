@@ -5,9 +5,16 @@ name and its ingredients' names, and nothing else: no portion, gram, nutrient,
 rationale (which can name a medication and a percentage) or anything from the
 profile. What comes back is kept only when `clean` finds no amount in it (no
 digit, no "%", and no number, multiplier, unit or household measure in words)
-and none of the nutrient words it lists. That is a word list, not a reader: it
-does not catch every nutrition or health claim, and "rich in iron" passes. The
-text reaches the plan as two new fields beside the planner's own, never in
+and none of the nutrient words it lists. That is a word list, not a reader, and
+these are its known gaps:
+
+- a nutrition or health claim in words it does not hold: "rich in iron" passes;
+- measures the planner's portions do not use: "plate" and "helping";
+- amounts it does not list: "thrice", "pinch", "handful" and "spoonful";
+- letters that only look like ASCII: a word spelt with a Cyrillic "о" is not
+  a run of ASCII letters, so it is not matched against the list.
+
+The text reaches the plan as two new fields beside the planner's own, never in
 place of them.
 
 The text is cached per user and dish, keyed by a hash of exactly what was sent.
@@ -109,7 +116,7 @@ BANNED_WORDS: frozenset[str] = frozenset(
         "servings",
         "portion",
         "portions",
-        # household measures: the planner writes portions in these ("1 katori")
+        # household measures: the planner writes portions in these ("1 katori", "1 bowl")
         "katori",
         "katoris",
         "tumbler",
@@ -117,6 +124,12 @@ BANNED_WORDS: frozenset[str] = frozenset(
         "ladle",
         "ladles",
         "ladleful",
+        "bowl",
+        "bowls",
+        "glass",
+        "glasses",
+        "piece",
+        "pieces",
         # nutrient words ("iron" is left out: "a cast-iron pan" is a cooking tip)
         "protein",
         "proteins",
