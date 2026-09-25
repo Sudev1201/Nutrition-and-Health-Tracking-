@@ -7,7 +7,10 @@ from app.config import settings
 from app.models import Base  # the registry import — pulls in every model
 
 config = context.config
-config.set_main_option("sqlalchemy.url", settings.database_url)
+# set_main_option is a ConfigParser set, which reads "%" as the start of an
+# interpolation: a URL-encoded password ("p%40ss") would fail before connecting.
+# "%%" is ConfigParser's escape, and alembic reads the URL back unescaped.
+config.set_main_option("sqlalchemy.url", settings.database_url.replace("%", "%%"))
 
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)

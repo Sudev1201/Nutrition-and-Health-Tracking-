@@ -58,4 +58,12 @@ def read_me(user: User = Depends(get_current_user)) -> User:
 
 @router.post("/logout", status_code=status.HTTP_204_NO_CONTENT)
 def logout(response: Response) -> None:
-    response.delete_cookie(settings.session_cookie_name)
+    # The attributes sign-in set it with. From https a bare deletion clears the
+    # cookie today, but under a __Host- or __Secure- name a Set-Cookie without
+    # Secure is rejected outright, and logout would quietly leave the session.
+    response.delete_cookie(
+        settings.session_cookie_name,
+        httponly=True,
+        secure=settings.cookie_secure,
+        samesite="lax",
+    )

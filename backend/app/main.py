@@ -30,6 +30,25 @@ from app.weight.router import router as weight_router
 logger = logging.getLogger(__name__)
 
 
+def _configure_logging() -> None:
+    """Send the app's own loggers to stderr at INFO, where the platform's log stream reads.
+
+    Uvicorn configures only its own loggers. Without this an `app.*` INFO line is
+    dropped, and a warning reaches stderr only through logging's last-resort
+    handler, with no level or logger name on it. Records still propagate to the
+    root logger, which has no handler under uvicorn, and which pytest's caplog
+    reads. A handler already on `app` -- from a --log-config, or an earlier
+    lifespan in the same process -- means this has been done, and it is left alone.
+    """
+    app_logger = logging.getLogger("app")
+    if app_logger.handlers:
+        return
+    handler = logging.StreamHandler()
+    handler.setFormatter(logging.Formatter("%(levelname)s [%(name)s] %(message)s"))
+    app_logger.addHandler(handler)
+    app_logger.setLevel(logging.INFO)
+
+
 @contextlib.asynccontextmanager
 async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     """Run the reminder loop beside the API, on the instance configured to send them.
@@ -39,6 +58,7 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     test's. The loop signs pushes with the VAPID private key, so without one it
     would only record every reminder as failed.
     """
+    _configure_logging()
     # Parse the LLM keyring now, so a malformed LLM_KEY_ENCRYPTION_KEYS stops the app at
     # boot instead of failing the first user who saves a key. An empty one only turns AI
     # descriptions off.
