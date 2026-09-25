@@ -492,6 +492,21 @@ def test_dishes_go_out_in_name_order_a_batch_at_a_time(
     assert all(item["description"] for item in items(polished))
 
 
+def test_a_call_carries_at_most_15_dishes(signed_in, planner_pool, llm_keyring, fake_provider):
+    """The request is synchronous, so each call is kept short: a hosting proxy may cut
+    an idle request at about a minute, and the provider does not retry."""
+    assert polish.MAX_DISHES_PER_CALL == 15
+    plan = planned(signed_in)
+    dishes = len({item["dish_id"] for item in items(plan)})
+
+    described(signed_in)
+
+    sizes = [len(briefs) for _, _, briefs in fake_provider.polished]
+    assert sum(sizes) == dishes
+    assert max(sizes) <= 15
+    assert len(sizes) == -(-dishes // 15)
+
+
 # --- the cache -------------------------------------------------------------------------------
 
 

@@ -264,7 +264,7 @@ The app must stay at the root of its host, because the service worker's scope is
 - **The app.** Walk the questionnaire, open Today, log a meal, and generate a week's plan.
 - **Reminders.** With VAPID keys set, install the app, turn reminders on under More, then Reminders, and wait for a meal time. On an iPhone, reminders need the app added to the Home Screen, and the installed app signs in again, since it has its own cookie jar.
 - **AI descriptions.** With the keyring set, save an Anthropic API key under More, then AI descriptions, and add descriptions to a plan. This is the first request that reaches Anthropic.
-  - If "Add descriptions" answers "Couldn't reach Anthropic" while Anthropic's status page is green, run `fly logs`. A line `anthropic call failed: BadRequestError (status 400)` means the API refused the request's shape for that model, not an outage.
+  - If "Add descriptions" answers "Couldn't reach Anthropic" while Anthropic's status page is green, run `fly logs`. A line `anthropic call failed: BadRequestError (status 400)` means the API refused the request's shape for that model, not an outage. A line `anthropic call failed: <error> (unreadable answer)` means Anthropic's address answered 200 with a body that is not a message, such as a proxy's HTML page.
   - If the Plan screen says "Claude added no new descriptions this time." while some dishes still have no description, the request reached Anthropic and was billed. But Claude declined, was cut off, or wrote nothing the server's check kept. Another click sends those dishes again, and is billed again. When every dish already has a description, the same line means there was nothing left to send.
 - **Safari's cookie cap.** Check this on an iPhone or a Mac with Safari. It is documented WebKit behaviour, not verified for this setup.
   - WebKit's tracking prevention caps a cookie at 7 days when a first-party subdomain sets it from a server whose IP address is unlike the page's.
@@ -283,8 +283,10 @@ The app must stay at the root of its host, because the service worker's scope is
 | `COOKIE_SECURE must be true` | Keep `COOKIE_SECURE = "true"` in `fly.toml`. |
 | `FRONTEND_ORIGIN must be an https:// origin with no trailing slash` | Fix `FRONTEND_ORIGIN` in `fly.toml`. |
 | `DATABASE_URL points at localhost` | Set the Neon URL as a secret. |
+| `FRONTEND_ORIGIN is still the example.com placeholder` | Replace `FRONTEND_ORIGIN` in `fly.toml` with `https://app.<domain>` (step 6). |
+| `DATABASE_URL is still the example.com placeholder` | Set the Neon URL as a secret, not an example from this runbook. |
 
-The localhost check reads the URL's host (`localhost`, `127.0.0.1` or `::1`). A URL with no host at all, such as the Unix-socket form `postgresql+psycopg:///hm`, is not refused. A hosted Postgres URL always carries a host, so this matters only if you paste something other than Neon's string.
+The placeholder check refuses `example.com` and any name under it, such as `app.example.com`, in either setting. It never quotes the value. The localhost check reads the URL's host (`localhost`, `127.0.0.1` or `::1`). A URL with no host at all, such as the Unix-socket form `postgresql+psycopg:///hm`, is not refused. A hosted Postgres URL always carries a host, so this matters only if you paste something other than Neon's string.
 
 The optional features are not required. With no VAPID keys, the Reminders screen says reminders are not set up on this server. With no `LLM_KEY_ENCRYPTION_KEYS`, the AI descriptions screen says the same. A *malformed* `LLM_KEY_ENCRYPTION_KEYS` stops the API at boot with `ValueError: LLM_KEY_ENCRYPTION_KEYS holds a value that is not a Fernet key`. The message is the same whatever is wrong with the entry, and it never quotes the value.
 
@@ -316,11 +318,14 @@ Every variable the API reads:
   - The AI descriptions screen tells users so.
   - Claude Sonnet 5 and Claude Haiku 4.5 are sent without the fallback.
 - **What a polish writes.** A polish stores its text in `dish_polish` only, and never writes a plan table: no dish, portion or number changes. When Anthropic refuses the saved key, the polish marks that key `rejected` in `user_settings` and answers 409, and a key that no longer opens is marked `unreadable`, so the AI descriptions screen asks for it again. A provider error rolls back every description written in that request.
-- **Keys are write-only.** A saved key is encrypted with the keyring and bound to its user. The API never returns it, only its last four characters, and never logs it. A provider error is logged as its class name and status code only.
+- **Keys are write-only.** A saved key is encrypted with the keyring and bound to its user. The API never returns it, only its last four characters, and never logs it. A provider error is logged as its class name and status code only: `anthropic call failed: <error> (status <n>)`, or `anthropic call failed: <error> (unreadable answer)` for a 200 whose body is not a message.
   - FastAPI's own 422 quotes the input that failed validation. On `/settings/llm` a validation handler answers a malformed body without quoting it, so even a misspelt or non-string `api_key` never comes back.
   - Every answer on `/settings/llm` except the 401 for a missing session, including the validation handler's 422, is sent `Cache-Control: no-store`.
 
 **Rotating the keyring:**
+
+> **Never boot the API, and never run `rotate_llm_keys`, with a keyring that lacks any old key.** A stored key that no key in the keyring opens is marked `unreadable` in the database. Putting the missing key back does not clear that mark, so every affected user has to enter their key again. The new key goes in front of the old ones; it never replaces them.
+
 1. Generate a new key and put it first: `LLM_KEY_ENCRYPTION_KEYS=<new>,<old>`. Store it with `fly secrets import`, as in step 7, which restarts the machine with the new value. New saves use the new key, and every stored key still opens with the old one.
 2. Run `fly ssh console -C "python -m scripts.rotate_llm_keys"`. A session may start in `/` rather than the image's `/app`. The image sets `PYTHONPATH=/app` and puts its virtualenv first on `PATH`, so the command works from either. It re-encrypts every key still under an older key, in one transaction, and is safe to re-run. It prints `rotated N, current N, unreadable N`.
    - It opens every stored key, including those already under the new key, and checks that each is bound to the user whose row holds it. A key that no key in the keyring opens, or one bound to another user (a row copied between users), is marked unreadable and left in place; its owner is asked to enter it again.
@@ -361,7 +366,8 @@ The alternative is to set `SCHEDULER_ENABLED = "false"` and run `python -m scrip
 | The plan is empty and food search finds nothing | The seed data is not loaded (step 8). |
 | The planner is very slow | The tables have no statistics. Run `ANALYZE` (step 8). |
 | No reminders arrive | Check, in order: the machine is running, `SCHEDULER_ENABLED` is true, both VAPID keys are set, and the device subscribed under the current pair. |
-| "Add descriptions" always answers "Couldn't reach Anthropic" | Check `fly logs` for `anthropic call failed: <error> (status <n>)`. A 400 means the API refused the call's options for the saved model (step 11). |
+| "Add descriptions" always answers "Couldn't reach Anthropic" | Check `fly logs` for `anthropic call failed: <error> (status <n>)`. A 400 means the API refused the call's options for the saved model (step 11). A line `anthropic call failed: <error> (unreadable answer)` means a 200 came back whose body was not a message, such as an HTML page from a proxy between the API and Anthropic. |
+| "Add descriptions" fails after a long wait, with "The descriptions could not be added. Please try again." | Fly's proxy cut the request off before the API answered (see "What was rehearsed, and what was not"). The request is synchronous: each batch of up to 15 dishes is one Anthropic call, with no retry. The API may still finish and store the descriptions, and Anthropic bills for them either way. Reload the Plan screen before clicking again, since dishes already described are not sent again. Check `fly logs` around the time of the click: an error from Fly's proxy about the request, with no `anthropic call failed` line from the app, points at the proxy's timeout rather than at Anthropic. |
 
 ## Alternatives, not configured
 
@@ -400,5 +406,6 @@ Not verified:
 - **What a deploy does to the one machine.** `fly.toml`'s `strategy = "rolling"` is expected to replace the only machine with a gap of a few seconds in which nothing answers. If Fly starts the new machine before it stops the old one, the two overlap briefly, each with its own reminder loop. That is safe, because every reminder is claimed in the database before it is sent. Neither has been observed.
 - The regions (`bom`, `aws-ap-south-1`) have not been checked against what each host offers today.
 - Safari's 7-day cookie cap (step 11).
+- **How long a polish request may take.** The platform's idle timeout for a long polish request has not been verified. `POST /plan/week/polish` is synchronous: it makes one Anthropic call per 15 dishes, one after another, with a 120-second timeout each and no retry. Fly's proxy is widely reported to cut an idle request at about 60 seconds. If it does, the user sees a generic failure while the request may still be billed (see "When something goes wrong").
 - No request has reached the real Anthropic API. The polish call for each model, including Claude Opus 5's structured outputs with `effort: low` and the refusal-fallback beta, comes from Anthropic's documentation. The first real polish in step 11 is the check.
 - How Cloudflare Pages itself applies `_headers` to the service worker files. Only `wrangler pages dev` has served them. Check with `curl -sI` (step 11).

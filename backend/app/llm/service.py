@@ -3,8 +3,9 @@
 The key belongs to the user, not the profile, so it lives in `user_settings`, a table a
 profile save never touches. What the settings screen reads -- the provider, the model, the
 last four characters and a status -- sits beside the ciphertext in plain columns, so a GET
-never decrypts. `key_for` is the one place a key is decrypted, and it serves only the
-signed-in user's own plan.
+never decrypts. `key_for` is the one place a key is decrypted for use, and it serves only
+the signed-in user's own plan. `rotate_all`, which `scripts.rotate_llm_keys` runs, also
+opens every token, to re-encrypt it and to re-check its user binding; nothing else decrypts.
 
 Services flush and never commit; the router commits.
 """

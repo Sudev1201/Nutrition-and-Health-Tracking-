@@ -55,6 +55,13 @@ settings.
   `RemoveKeyFailed`; each card owns its own delete mutation.
 - `PlanScreen` passes the cache-based `regenerating` to `DayPanel`, so the lockout survives a
   remount.
+- Final review: polish sends at most 15 dishes a call (`MAX_DISHES_PER_CALL = 15`, was 40) and
+  never retries (`max_retries=0`, was 1; the 120 s timeout stays). `POST /plan/week/polish` is
+  synchronous, and 40 dishes plus a retry could outlast a hosting proxy's idle cut-off (about
+  60 s on Fly, unverified), so the user would see a generic failure and still be billed.
+- Final review: production also refuses a `FRONTEND_ORIGIN` or `DATABASE_URL` whose host is
+  `example.com` or a name under it, `fly.toml`'s placeholder, with a fixed message that never
+  quotes the value.
 
 ## Global Constraints
 
@@ -12721,9 +12728,10 @@ Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>"
   - The Plan screen now says so: `X-Dishes-Described: 0` shows "Claude added no new descriptions this time.", so the click no longer looks as if it did nothing. Nothing stops a repeat click.
 - **Nothing checks that a description is right about its dish.** Text that passes the guard is shown as the model wrote it, and a regional dish can be described wrongly.
 - **Polish holds a database connection through the model call.**
-  - The request's session stays open for every batch: up to 120 s a call, plus one retry.
+  - The request's session stays open for every batch: up to 120 s a call, with no retry.
   - The pool has 5 connections and 10 overflow per process, so a burst of concurrent polishes can starve other requests.
-- **A long `retry-after` holds a request.** The SDK waits out a 429's `retry-after`, however long, before its one retry.
+- **A long polish can outlast the hosting proxy.** The request is synchronous: one call per 15 dishes, one after another, each allowed 120 s. Fly's proxy is reported to cut an idle request at about 60 s, which is unverified. If it does, the user sees a generic failure while the request may still finish and be billed.
+- **Polish can send a household member's dish name to this user's Anthropic account.** Polish sends every dish name in the plan, including a household member's user-created dish, which could reach this user's Anthropic account. Latent: no code creates user dishes yet. When dish creation lands, send only seed dishes and the user's own.
 - **Polish feedback is lost after leaving the Plan screen mid-polish.**
   - If the user navigates away while "Add descriptions" runs and comes back, the buttons stay locked until it ends, and the new descriptions appear.
   - But the completion line ("Claude added no new descriptions this time.") and any failure alert do not show: they read the screen's own mutation observer, which starts idle after a remount.

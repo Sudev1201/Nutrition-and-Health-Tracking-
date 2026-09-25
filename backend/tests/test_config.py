@@ -16,8 +16,8 @@ CLEAN_PRODUCTION = {
     "session_secret": "s" * 48,
     "google_client_id": "1234567890-abcdef.apps.googleusercontent.com",
     "cookie_secure": True,
-    "frontend_origin": "https://app.example.com",
-    "database_url": "postgresql+psycopg://hm:db-password@db.example.com:5432/hm?sslmode=require",
+    "frontend_origin": "https://app.test.invalid",
+    "database_url": "postgresql+psycopg://hm:db-password@db.test.invalid:5432/hm?sslmode=require",
 }
 
 # The wording is pinned here, not imported: the image check in CI and the
@@ -27,6 +27,8 @@ CLIENT_ID = "GOOGLE_CLIENT_ID is empty"
 COOKIE = "COOKIE_SECURE must be true"
 ORIGIN = "FRONTEND_ORIGIN must be an https:// origin with no trailing slash"
 DATABASE = "DATABASE_URL points at localhost"
+PLACEHOLDER_ORIGIN = "FRONTEND_ORIGIN is still the example.com placeholder"
+PLACEHOLDER_DATABASE = "DATABASE_URL is still the example.com placeholder"
 
 
 @pytest.fixture(autouse=True)
@@ -62,9 +64,9 @@ def test_a_clean_production_config_loads():
         pytest.param({"google_client_id": ""}, CLIENT_ID, id="no-client-id"),
         pytest.param({"google_client_id": "   "}, CLIENT_ID, id="blank-client-id"),
         pytest.param({"cookie_secure": False}, COOKIE, id="insecure-cookie"),
-        pytest.param({"frontend_origin": "http://app.example.com"}, ORIGIN, id="http-origin"),
-        pytest.param({"frontend_origin": "https://app.example.com/"}, ORIGIN, id="trailing-slash"),
-        pytest.param({"frontend_origin": "https://app.example.com/app"}, ORIGIN, id="origin-path"),
+        pytest.param({"frontend_origin": "http://app.test.invalid"}, ORIGIN, id="http-origin"),
+        pytest.param({"frontend_origin": "https://app.test.invalid/"}, ORIGIN, id="trailing-slash"),
+        pytest.param({"frontend_origin": "https://app.test.invalid/app"}, ORIGIN, id="origin-path"),
         pytest.param(
             {"database_url": "postgresql+psycopg://hm:pw@localhost:5432/hm"},
             DATABASE,
@@ -78,6 +80,32 @@ def test_a_clean_production_config_loads():
         # Normalised first, then checked.
         pytest.param(
             {"database_url": "postgres://hm:pw@localhost/hm"}, DATABASE, id="libpq-localhost"
+        ),
+        # fly.toml's placeholders, left in place.
+        pytest.param(
+            {"frontend_origin": "https://app.example.com"},
+            PLACEHOLDER_ORIGIN,
+            id="placeholder-origin",
+        ),
+        pytest.param(
+            {"frontend_origin": "https://example.com"},
+            PLACEHOLDER_ORIGIN,
+            id="placeholder-apex-origin",
+        ),
+        pytest.param(
+            {"frontend_origin": "https://APP.Example.COM:8443"},
+            PLACEHOLDER_ORIGIN,
+            id="placeholder-origin-any-case",
+        ),
+        pytest.param(
+            {"database_url": "postgresql+psycopg://hm:pw@db.example.com:5432/hm"},
+            PLACEHOLDER_DATABASE,
+            id="placeholder-database",
+        ),
+        pytest.param(
+            {"database_url": "postgres://hm:pw@example.com/hm"},
+            PLACEHOLDER_DATABASE,
+            id="placeholder-apex-database",
         ),
     ],
 )
@@ -102,9 +130,43 @@ def test_a_32_character_secret_is_long_enough():
 
 
 def test_a_port_on_the_origin_is_fine():
-    origin = "https://app.example.com:8443"
+    origin = "https://app.test.invalid:8443"
     configured = Settings(_env_file=None, **{**CLEAN_PRODUCTION, "frontend_origin": origin})
     assert configured.frontend_origin == origin
+
+
+@pytest.mark.parametrize(
+    "origin",
+    [
+        pytest.param("https://app.notexample.com", id="ends-in-example-com-but-not-under-it"),
+        pytest.param("https://example.com.test.invalid", id="example-com-as-a-subdomain"),
+    ],
+)
+def test_only_example_com_and_names_under_it_are_placeholders(origin):
+    configured = Settings(_env_file=None, **{**CLEAN_PRODUCTION, "frontend_origin": origin})
+    assert configured.frontend_origin == origin
+
+
+def test_both_placeholders_are_named_at_once_and_never_quoted():
+    """As a first deploy that kept fly.toml's origin and pasted a docs example URL."""
+    with pytest.raises(ValidationError) as excinfo:
+        Settings(
+            _env_file=None,
+            **{
+                **CLEAN_PRODUCTION,
+                "frontend_origin": "https://app.example.com",
+                "database_url": "postgresql+psycopg://hm:s3cret-pw@db.example.com/hm",
+            },
+        )
+
+    [error] = excinfo.value.errors()
+    assert str(error["ctx"]["error"]) == (
+        f"Refusing to start in production: {PLACEHOLDER_ORIGIN}; {PLACEHOLDER_DATABASE}"
+    )
+    message = str(excinfo.value)
+    assert "app.example.com" not in message
+    assert "db.example.com" not in message
+    assert "s3cret-pw" not in message
 
 
 def test_the_refusal_never_repeats_a_value():

@@ -2,9 +2,11 @@
 #
 # Nothing in this file is secret, and no secret belongs here. DATABASE_URL,
 # SESSION_SECRET, GOOGLE_CLIENT_ID, VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY and
-# LLM_KEY_ENCRYPTION_KEYS go in with `fly secrets set`; DEPLOY.md lists them.
+# LLM_KEY_ENCRYPTION_KEYS go in with `fly secrets import`, which reads them from
+# standard input and so keeps them out of shell history; DEPLOY.md lists them.
 # Before a first deploy, replace the app name, both example.com values and the
-# VAPID contact below.
+# VAPID contact below. Production refuses to start while FRONTEND_ORIGIN is
+# still on example.com.
 
 app = "healthmonitor-api"
 # Mumbai, beside Neon's aws-ap-south-1. Check both are still offered.

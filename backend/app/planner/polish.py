@@ -42,9 +42,10 @@ from app.models.user import User
 # answer is refused. Refused, not cut: half a sentence is worse than none.
 MAX_TEXT = 280
 # One structured-output call per this many dishes. A week holds 15 to 25
-# distinct dishes, so one call is the usual case; the cap keeps a very varied
-# week's answer well inside the call's max_tokens.
-MAX_DISHES_PER_CALL = 40
+# distinct dishes, so one or two calls is the usual case. The cap keeps each
+# call short, since the request is synchronous and a hosting proxy may cut an
+# idle request at about a minute, and keeps each answer well inside max_tokens.
+MAX_DISHES_PER_CALL = 15
 
 # Words that state an amount, change a portion or name a nutrient. Matched as
 # whole words, case-insensitively, where a word is a run of ASCII letters.

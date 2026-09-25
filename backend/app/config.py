@@ -17,6 +17,19 @@ _PSYCOPG_SCHEME = "postgresql+psycopg://"
 
 _LOCAL_HOSTS = frozenset({"localhost", "127.0.0.1", "::1"})
 
+# fly.toml and the runbook's examples use example.com, a name reserved for
+# documentation (RFC 2606). A deploy that still points at it has not replaced
+# the placeholder.
+_PLACEHOLDER_DOMAIN = "example.com"
+
+
+def _is_placeholder_host(host: str | None) -> bool:
+    """`example.com` or any name under it, whatever its case."""
+    if not host:
+        return False
+    host = host.lower().rstrip(".")
+    return host == _PLACEHOLDER_DOMAIN or host.endswith("." + _PLACEHOLDER_DOMAIN)
+
 
 def _is_https_origin(value: str) -> bool:
     """`https://host[:port]` and nothing after it.
@@ -114,8 +127,13 @@ class Settings(BaseSettings):
             problems.append("COOKIE_SECURE must be true")
         if not _is_https_origin(self.frontend_origin):
             problems.append("FRONTEND_ORIGIN must be an https:// origin with no trailing slash")
-        if urlsplit(self.database_url).hostname in _LOCAL_HOSTS:
+        elif _is_placeholder_host(urlsplit(self.frontend_origin).hostname):
+            problems.append("FRONTEND_ORIGIN is still the example.com placeholder")
+        database_host = urlsplit(self.database_url).hostname
+        if database_host in _LOCAL_HOSTS:
             problems.append("DATABASE_URL points at localhost")
+        elif _is_placeholder_host(database_host):
+            problems.append("DATABASE_URL is still the example.com placeholder")
         if problems:
             raise ValueError("Refusing to start in production: " + "; ".join(problems))
         return self

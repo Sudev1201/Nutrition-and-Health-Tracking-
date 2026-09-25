@@ -181,7 +181,10 @@ class AnthropicProvider:
 
     def polish(self, api_key: str, model: str, dishes: Sequence[DishBrief]) -> dict[str, DishText]:
         """Text per reference, unfiltered, or {} when the model refused or was cut off."""
-        client = self._client(api_key, timeout=120.0, max_retries=1)
+        # No retry: the request is synchronous, and a retry after a slow failure would take
+        # it past a hosting proxy's idle cut-off (about 60 s on Fly, not verified), so the
+        # user would see a generic failure for a call that may still be billed.
+        client = self._client(api_key, timeout=120.0, max_retries=0)
         if not dishes:
             return {}
         options: dict[str, Any] = {}

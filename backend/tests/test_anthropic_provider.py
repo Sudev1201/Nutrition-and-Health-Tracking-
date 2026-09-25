@@ -112,8 +112,9 @@ def message(stop_reason: str = "end_turn", text: str | None = None) -> httpx2.Re
 
 
 def error(status: int, kind: str) -> httpx2.Response:
-    # retry-after-ms: the SDK honours it, so polish's one retry of a 429 or a 5xx waits a
-    # millisecond instead of its half-second backoff.
+    # retry-after-ms: neither call retries, but the SDK honours it, so a retry brought back
+    # by mistake waits a millisecond here instead of its half-second backoff, and the
+    # request counts below still catch it.
     return httpx2.Response(
         status,
         headers={"retry-after-ms": "1"},
@@ -365,13 +366,15 @@ def test_an_empty_batch_is_not_sent():
     assert anthropic.requests == []
 
 
-def test_polish_retries_once_then_gives_up():
-    anthropic = answering(error(529, "overloaded_error"))
+@pytest.mark.parametrize(("status", "kind"), [(529, "overloaded_error"), (429, "rate_limit_error")])
+def test_polish_is_not_retried(status, kind):
+    """The request is synchronous: a retry would take it past a proxy's idle cut-off."""
+    anthropic = answering(error(status, kind))
 
     with pytest.raises(ProviderUnavailable):
         anthropic.provider().polish(KEY, DEFAULT_MODEL, BRIEFS)
 
-    assert len(anthropic.requests) == 2
+    assert len(anthropic.requests) == 1
 
 
 # --- failures ----------------------------------------------------------------
