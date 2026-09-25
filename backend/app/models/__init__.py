@@ -18,6 +18,7 @@ from app.models.food import (
     PortionMeasure,
 )
 from app.models.household import Household, HouseholdInvite, HouseholdMember
+from app.models.llm import DishPolish, UserSettings
 from app.models.nutrient import Nutrient
 from app.models.plan import MealPlan, MealPlanItem
 from app.models.profile import (
@@ -46,6 +47,7 @@ __all__ = [
     "Dish",
     "DishIngredient",
     "DishNutrient",
+    "DishPolish",
     "FavouriteIngredient",
     "HealthCondition",
     "Household",
@@ -68,6 +70,7 @@ __all__ = [
     "ReminderDelivery",
     "UpperLimit",
     "User",
+    "UserSettings",
     "UsualIntakeItem",
     "WeightLog",
 ]

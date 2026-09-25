@@ -14,9 +14,9 @@ out already holding a valid cookie, exactly as it would after signing in.
 Usage:
     uv run python -m scripts.e2e_session [--reset]
 
-`--reset` deletes everything the user has logged, planned, answered and
-subscribed, so a run starts from onboarding. It never touches any user but this
-one.
+`--reset` deletes everything the user has logged, planned, answered,
+subscribed and saved, so a run starts from onboarding. It never touches any
+user but this one.
 """
 
 import argparse
@@ -30,6 +30,7 @@ from app.config import settings
 from app.db import SessionLocal
 from app.models.cycle import CycleLog, CycleScreening, CycleSettings, CycleSymptom
 from app.models.diary import MealLog, MealSlotSkip
+from app.models.llm import DishPolish, UserSettings
 from app.models.plan import MealPlan
 from app.models.profile import (
     AvoidedFood,
@@ -52,8 +53,8 @@ E2E_EMAIL = "e2e@playwright.invalid"
 # Everything the walk writes. Each is keyed on user_id; meal_plan_items goes with
 # its plan through the foreign key's ON DELETE CASCADE. Missing a table here means
 # a second run starts from the first run's leftovers -- a weigh-in history that
-# grows every run, cycle tracking already switched on, or a device still
-# subscribed to the last run's reminders.
+# grows every run, cycle tracking already switched on, a device still
+# subscribed to the last run's reminders, or an API key the last run saved.
 OWNED_MODELS = (
     MealLog,
     MealSlotSkip,
@@ -66,6 +67,8 @@ OWNED_MODELS = (
     CycleSettings,
     ReminderDelivery,
     PushSubscription,
+    DishPolish,
+    UserSettings,
     HealthCondition,
     Medication,
     MealSlotTime,
