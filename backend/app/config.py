@@ -33,5 +33,11 @@ class Settings(BaseSettings):
     # read the development database.
     scheduler_enabled: bool = False
 
+    # AI descriptions (plan 9). Comma-separated Fernet keys: the first encrypts, every one
+    # decrypts, so a new key goes first and an old one stays until scripts.rotate_llm_keys
+    # has re-encrypted every row. Empty turns the feature off on this server. Never derived
+    # from session_secret: rotating a leaked session secret must not destroy stored keys.
+    llm_key_encryption_keys: str = ""
+
 
 settings = Settings()
