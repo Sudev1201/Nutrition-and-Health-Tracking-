@@ -1,5 +1,6 @@
 from pathlib import Path
 
+import httpx2
 import pytest
 from alembic.config import Config
 from alembic.script import ScriptDirectory
@@ -9,6 +10,7 @@ from sqlalchemy.orm import Session
 
 from app.auth import google as google_auth
 from app.config import settings
+from app.llm import providers
 from app.main import app
 from app.models.food import Dish, DishIngredient, Ingredient, IngredientNutrient
 from app.models.nutrient import Nutrient
@@ -74,6 +76,32 @@ def scheduler_off():
     with pytest.MonkeyPatch.context() as patch:
         patch.setattr(settings, "scheduler_enabled", False)
         yield
+
+
+@pytest.fixture(autouse=True)
+def no_llm_network(monkeypatch) -> list[httpx2.Request]:
+    """Any AnthropicProvider built without an explicit client fails before reaching the network.
+
+    A provider built without one asks `providers._default_http_client` for its HTTP client,
+    and in production gets None, so the SDK builds a real one. Here it gets a client whose
+    transport raises instead. The SDK reports that as a connection error, which the adapter
+    turns into ProviderUnavailable, so a test that forgot its fake fails without a request
+    ever leaving the machine. Adapter tests pass their own mock client and are unaffected.
+
+    The value is the list of requests refused, which the adapter's self-check reads.
+    """
+    refused: list[httpx2.Request] = []
+
+    def refuse(request: httpx2.Request) -> httpx2.Response:
+        refused.append(request)
+        raise RuntimeError("tests never reach a real LLM")
+
+    monkeypatch.setattr(
+        providers,
+        "_default_http_client",
+        lambda: httpx2.Client(transport=httpx2.MockTransport(refuse)),
+    )
+    return refused
 
 
 @pytest.fixture(scope="session")

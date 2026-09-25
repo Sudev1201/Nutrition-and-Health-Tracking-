@@ -16,6 +16,8 @@ dependencies = [
     "openpyxl>=3.1.5",
     "pywebpush>=2.5.0",
     "cryptography>=46",
+    "anthropic>=1.8,<2",
+    "httpx2>=2.13,<3",
 ]
 
 [dependency-groups]
